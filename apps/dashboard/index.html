@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise LangGraph Platform (LGP v2.0)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0284c7',
+              600: '#0369a1',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col antialiased">
+  <!-- Top Navigation -->
+  <header class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+          LGP
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+            Enterprise LangGraph Platform
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-mono border border-blue-500/30">v2.0</span>
+          </h1>
+          <p class="text-xs text-gray-400">10 Subagents Flagship Swarm • Atlas Supervisor</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <span id="platform-status" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>
+          Daemon PM2 Online
+        </span>
+        <a href="/docs" target="_blank" class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-800 hover:bg-gray-800 transition">Swagger API</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 flex flex-col gap-6">
+    <!-- Tab Controls -->
+    <div class="flex border-b border-gray-800 gap-4 text-sm font-medium">
+      <button onclick="switchTab('subagents')" id="tab-btn-subagents" class="tab-btn pb-3 text-blue-400 border-b-2 border-blue-500">10 Subagents & Pods</button>
+      <button onclick="switchTab('runs')" id="tab-btn-runs" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">Execution Console & Runs</button>
+      <button onclick="switchTab('heatmap')" id="tab-btn-heatmap" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">10x10 Correlation Heatmap</button>
+      <button onclick="switchTab('hitl')" id="tab-btn-hitl" class="tab-btn pb-3 text-gray-400 hover:text-gray-200 flex items-center gap-1.5">
+        HITL Inbox
+        <span id="hitl-badge" class="hidden px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-black font-bold">0</span>
+      </button>
+      <button onclick="switchTab('audit')" id="tab-btn-audit" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">Audit Log (Hash Chain)</button>
+    </div>
+
+    <!-- TAB 1: 10 Subagents -->
+    <div id="tab-subagents" class="tab-content space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- Metric Cards -->
+        <div class="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+          <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Total Subagents</p>
+          <p class="text-2xl font-bold text-white mt-1">10 <span class="text-xs font-normal text-emerald-400">Aktif</span></p>
+          <p class="text-xs text-gray-500 mt-1">4 Pod Fungsional</p>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+          <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Orkestrasi Pola</p>
+          <p class="text-2xl font-bold text-blue-400 mt-1">Supervisor</p>
+          <p class="text-xs text-gray-500 mt-1">ContextPacket via Tools</p>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+          <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Hard Stop Harian</p>
+          <p class="text-2xl font-bold text-amber-400 mt-1">$15.00</p>
+          <p class="text-xs text-gray-500 mt-1">Circuit Breaker (3 Failures)</p>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 p-4 rounded-xl">
+          <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Keamanan Isolasi</p>
+          <p class="text-2xl font-bold text-purple-400 mt-1">Least Privilege</p>
+          <p class="text-xs text-gray-500 mt-1">Clio / Vulcan / Themis Guards</p>
+        </div>
+      </div>
+
+      <div id="subagents-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Subagent Cards rendered by JS -->
+      </div>
+    </div>
+
+    <!-- TAB 2: Runs & Execution Console -->
+    <div id="tab-runs" class="tab-content hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Launcher Form -->
+        <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl space-y-4">
+          <h2 class="text-base font-semibold text-white flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+            Launch Task Baru (Atlas)
+          </h2>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1">Objective / Permintaan</label>
+            <textarea id="task-objective" rows="4" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500" placeholder="Contoh: Buat analisis perbandingan arsitektur microservices dan verifikasi keamanannya"></textarea>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-300 mb-1">Effort Scaling / Subagents</label>
+            <select id="task-agents" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-sm text-gray-100 focus:outline-none focus:border-blue-500">
+              <option value="auto">Auto (Atlas Supervisor Scaling)</option>
+              <option value="clio,iris">Riset & Sintesis (Clio + Iris)</option>
+              <option value="vulcan,athena,themis">Koding & Critic Loop (Vulcan + Athena + Themis)</option>
+              <option value="hermes,themis,iris">Platform Ops & Incident (Hermes + Themis + Iris)</option>
+              <option value="all">Enterprise Flagship (Semua 10 Subagent)</option>
+            </select>
+          </div>
+          <button onclick="launchTask()" id="btn-launch" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition shadow-lg shadow-blue-600/20">
+            Jalankan Run
+          </button>
+        </div>
+
+        <!-- Live Trace Console -->
+        <div class="lg:col-span-2 bg-gray-900 border border-gray-800 p-5 rounded-xl flex flex-col h-[520px]">
+          <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+            <h2 class="text-sm font-semibold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              Live Telemetry & SSE Stream
+            </h2>
+            <span id="current-run-id" class="text-xs font-mono text-gray-400">Idle</span>
+          </div>
+          <div id="console-logs" class="flex-1 overflow-y-auto font-mono text-xs p-3 space-y-2 text-gray-300 scrollbar-thin mt-2">
+            <p class="text-gray-500 italic">Menunggu inisiasi run...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: Correlation Heatmap -->
+    <div id="tab-heatmap" class="tab-content hidden space-y-4">
+      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Matriks Korelasi 10x10 Subagent</h2>
+            <p class="text-xs text-gray-400 mt-0.5">Dihitung dari Telemetri L1: NPMI Ko-aktivasi, Success Lift, Handoff Rate</p>
+          </div>
+          <div class="flex items-center gap-4 text-xs">
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500/80"></span> Positif (>0.05)</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-gray-800 border border-gray-700"></span> Netral</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-rose-500/80"></span> Negatif (<-0.05)</span>
+          </div>
+        </div>
+        <div class="overflow-x-auto scrollbar-thin">
+          <table class="w-full text-xs border-collapse">
+            <thead>
+              <tr id="heatmap-header"></tr>
+            </thead>
+            <tbody id="heatmap-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: HITL Inbox -->
+    <div id="tab-hitl" class="tab-content hidden space-y-4">
+      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl space-y-4">
+        <h2 class="text-base font-semibold text-white">Human-in-the-Loop (HITL) Inbox</h2>
+        <p class="text-xs text-gray-400">Interupsi kebijakan runtime: Loop detector, effort scaling > 4 subagent, dan otorisasi promote prod.</p>
+        <div id="hitl-list" class="space-y-3">
+          <p class="text-xs text-gray-500 italic">Tidak ada antrean interupsi yang tertunda.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: Audit Log -->
+    <div id="tab-audit" class="tab-content hidden space-y-4">
+      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-white">Tamper-Evident Audit Log (SHA-256)</h2>
+            <p class="text-xs text-gray-400">Append-only hash chaining menjamin integritas catatan aktivitas platform.</p>
+          </div>
+          <button onclick="loadAuditLogs()" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700">Refresh</button>
+        </div>
+        <div class="overflow-x-auto scrollbar-thin max-h-96">
+          <table class="w-full text-xs text-left">
+            <thead class="text-gray-400 uppercase bg-gray-950 border-b border-gray-800">
+              <tr>
+                <th class="p-2.5">Waktu</th>
+                <th class="p-2.5">Actor</th>
+                <th class="p-2.5">Action</th>
+                <th class="p-2.5">Scope</th>
+                <th class="p-2.5">Curr Hash</th>
+                <th class="p-2.5">Status</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-body" class="divide-y divide-gray-800"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="border-t border-gray-900 py-4 text-center text-xs text-gray-500">
+    Enterprise LangGraph Platform (LGP v2.0) • Monitored by PM2 Process Manager
+  </footer>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('text-blue-400', 'border-b-2', 'border-blue-500');
+        btn.classList.add('text-gray-400');
+      });
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+
+      document.getElementById('tab-btn-' + tabId).classList.add('text-blue-400', 'border-b-2', 'border-blue-500');
+      document.getElementById('tab-btn-' + tabId).classList.remove('text-gray-400');
+      document.getElementById('tab-' + tabId).classList.remove('hidden');
+
+      if (tabId === 'heatmap') loadHeatmap();
+      if (tabId === 'hitl') loadHitl();
+      if (tabId === 'audit') loadAuditLogs();
+    }
+
+    async function loadSubagents() {
+      try {
+        const res = await fetch('/api/subagents');
+        const data = await res.json();
+        const container = document.getElementById('subagents-list');
+        container.innerHTML = '';
+
+        data.subagents.forEach(agent => {
+          const card = document.createElement('div');
+          card.className = "bg-gray-900 border border-gray-800 hover:border-gray-700 p-4 rounded-xl flex flex-col justify-between transition";
+
+          let podBadgeColor = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+          if (agent.pod.includes('Riset')) podBadgeColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+          if (agent.pod.includes('Platform')) podBadgeColor = 'bg-purple-500/10 text-purple-400 border-purple-500/20';
+          if (agent.pod.includes('Tata Kelola')) podBadgeColor = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+
+          card.innerHTML = `
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs px-2 py-0.5 rounded-full border ${podBadgeColor} font-medium">Pod ${agent.pod}</span>
+                <span class="text-[11px] font-mono text-gray-500">v${agent.version}</span>
+              </div>
+              <h3 class="text-sm font-bold text-white">${agent.name}</h3>
+              <p class="text-xs text-gray-400 mt-1">${agent.role}</p>
+              <div class="mt-3">
+                <p class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Kapabilitas:</p>
+                <ul class="text-xs text-gray-300 mt-1 space-y-0.5">
+                  ${agent.capabilities.slice(0, 2).map(c => `<li>• ${c}</li>`).join('')}
+                </ul>
+              </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-gray-800/80 flex items-center justify-between text-xs text-gray-400">
+              <span>Budget: $${agent.budget_config.max_usd || 'N/A'}</span>
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-gray-800 text-gray-300">${agent.trust_level} Trust</span>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function launchTask() {
+      const objective = document.getElementById('task-objective').value.trim();
+      if (!objective) return alert('Silakan masukkan objective');
+
+      const selectVal = document.getElementById('task-agents').value;
+      let subagents = null;
+      if (selectVal !== 'auto') {
+        if (selectVal === 'all') {
+          subagents = ["atlas", "clio", "vulcan", "athena", "hermes", "mnemosyne", "janus", "themis", "metron", "iris"];
+        } else {
+          subagents = selectVal.split(',');
+        }
+      }
+
+      const btn = document.getElementById('btn-launch');
+      btn.disabled = true;
+      btn.innerText = 'Menjalankan...';
+
+      const consoleBox = document.getElementById('console-logs');
+      consoleBox.innerHTML = '<p class="text-blue-400 font-bold">[INIT] Inisiasi run via Atlas Supervisor...</p>';
+
+      try {
+        const res = await fetch('/api/runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ objective, subagents })
+        });
+        const data = await res.json();
+
+        document.getElementById('current-run-id').innerText = data.run_id;
+
+        // Log results
+        const runId = data.run_id;
+        consoleBox.innerHTML += `<p class="text-emerald-400">[SUCCESS] Run ID: ${runId} Status: ${data.status}</p>`;
+        if (data.final_answer) {
+          consoleBox.innerHTML += `<p class="text-white mt-2 p-2 bg-gray-950 rounded border border-gray-800">${data.final_answer}</p>`;
+        }
+        if (data.delegates_report) {
+          data.delegates_report.forEach(d => {
+            consoleBox.innerHTML += `<p class="text-gray-300">↳ <b>${d.subagent}</b> [Pod ${d.pod}]: tokens=${d.tokens}, cost=$${d.cost_usd}</p>`;
+          });
+        }
+        if (data.cost_summary) {
+          consoleBox.innerHTML += `<p class="text-amber-400 font-bold mt-2">Total Biaya: $${data.cost_summary.total_usd.toFixed(4)} | Tokens: ${data.cost_summary.total_tokens}</p>`;
+        }
+      } catch (err) {
+        consoleBox.innerHTML += `<p class="text-rose-400">[ERROR] ${err.message}</p>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Jalankan Run';
+      }
+    }
+
+    async function loadHeatmap() {
+      try {
+        const res = await fetch('/api/correlations');
+        const data = await res.json();
+        const header = document.getElementById('heatmap-header');
+        const body = document.getElementById('heatmap-body');
+
+        header.innerHTML = '<th class="p-2 bg-gray-950 text-gray-400">Src \\ Tgt</th>' +
+          data.subagents.map(s => `<th class="p-2 bg-gray-950 text-gray-300 font-mono">${s}</th>`).join('');
+
+        body.innerHTML = '';
+        data.matrix.forEach((row, i) => {
+          const tr = document.createElement('tr');
+          let html = `<td class="p-2 font-mono font-bold text-gray-300 bg-gray-950 border-r border-gray-800">${data.subagents[i]}</td>`;
+
+          row.forEach(cell => {
+            let bgColor = 'bg-gray-900 text-gray-500';
+            if (cell.polarity === 'positive') bgColor = 'bg-emerald-950 text-emerald-400 font-bold';
+            if (cell.polarity === 'negative') bgColor = 'bg-rose-950 text-rose-400 font-bold';
+            if (cell.source === cell.target) bgColor = 'bg-blue-950 text-blue-400 font-bold';
+
+            html += `<td class="p-2 text-center border border-gray-800 ${bgColor}" title="NPMI: ${cell.npmi}, Handoff: ${cell.handoff_rate}">
+              ${cell.weight.toFixed(2)}
+              ${cell.low_data ? '<span class="text-[9px] block text-amber-500">*</span>' : ''}
+            </td>`;
+          });
+          tr.innerHTML = html;
+          body.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function loadHitl() {
+      try {
+        const res = await fetch('/api/hitl/inbox');
+        const list = await res.json();
+        const container = document.getElementById('hitl-list');
+        const badge = document.getElementById('hitl-badge');
+
+        const pending = list.filter(item => item.status === 'pending');
+        if (pending.length > 0) {
+          badge.innerText = pending.length;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+
+        if (list.length === 0) {
+          container.innerHTML = '<p class="text-xs text-gray-500 italic">Tidak ada interupsi dalam inbox.</p>';
+          return;
+        }
+
+        container.innerHTML = '';
+        list.forEach(item => {
+          const div = document.createElement('div');
+          div.className = "bg-gray-950 border border-gray-800 p-4 rounded-lg flex items-center justify-between";
+          div.innerHTML = `
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs px-2 py-0.5 rounded font-mono ${item.status === 'pending' ? 'bg-amber-500/20 text-amber-400' : 'bg-gray-800 text-gray-400'}">${item.status.toUpperCase()}</span>
+                <span class="text-xs text-gray-400 font-mono">Run: ${item.run_id}</span>
+              </div>
+              <p class="text-sm font-semibold text-white mt-1">${item.reason}</p>
+              <p class="text-xs text-gray-500">Subagent: ${item.subagent_id} • Approver: ${item.approver || '-'}</p>
+            </div>
+            ${item.status === 'pending' ? `
+              <div class="flex gap-2">
+                <button onclick="resolveHitl('${item.interrupt_id}', 'approved')" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded">Approve</button>
+                <button onclick="resolveHitl('${item.interrupt_id}', 'rejected')" class="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded">Reject</button>
+              </div>
+            ` : ''}
+          `;
+          container.appendChild(div);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function resolveHitl(interrupt_id, decision) {
+      const approver = prompt("Masukkan nama/ID approver manusia:", "Operator-1");
+      if (!approver) return;
+
+      try {
+        const res = await fetch('/api/hitl/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interrupt_id, approver, decision })
+        });
+        const data = await res.json();
+        if (data.error) alert(data.error);
+        loadHitl();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function loadAuditLogs() {
+      try {
+        const res = await fetch('/api/audit');
+        const data = await res.json();
+        const tbody = document.getElementById('audit-table-body');
+        tbody.innerHTML = '';
+
+        data.forEach(log => {
+          const tr = document.createElement('tr');
+          const timeStr = new Date(log.created_at * 1000).toLocaleTimeString();
+          tr.innerHTML = `
+            <td class="p-2.5 font-mono text-gray-400">${timeStr}</td>
+            <td class="p-2.5 font-bold text-gray-200">${log.actor}</td>
+            <td class="p-2.5 font-mono text-blue-400">${log.action}</td>
+            <td class="p-2.5 text-gray-400">${log.scope}</td>
+            <td class="p-2.5 font-mono text-[10px] text-gray-500">${log.curr_hash.substring(0, 16)}...</td>
+            <td class="p-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400">${log.result_status}</span></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Initial load
+    loadSubagents();
+  </script>
+</body>
+</html>
