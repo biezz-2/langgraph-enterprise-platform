@@ -1,0 +1,22 @@
+# LGP v2.0 Wiki Index for AI Agents & Models
+
+System: Enterprise LangGraph Platform (LGP v2.0)
+Owner/Team: claude-biezz-2 & Team
+
+## Summary of Guidelines for AI Agents:
+
+1. Always format memories using the structured taxonomy format: `Category:ItemName`.
+   - Categories: `Session`, `Subagent`, `Model`, `Architecture`, `Security`, `Telemetry`, `User_Preference`.
+2. Always redact PII before storing facts (`TemporalMemoryStore.redact_pii`).
+3. Link memories to `episode_run_id` or conversation session ID.
+4. When facts change, mark previous facts as obsolete with `invalid_at = timestamp`.
+
+## Key Index Files:
+- wiki/overview.md: Project architecture summary.
+- wiki/concepts/memory-taxonomy.md: Bi-temporal memory taxonomy & labeling standards.
+- wiki/concepts/10-subagents.md: Specifications for all 10 flagship subagents across 4 pods.
+- wiki/concepts/guardrails.md: Security, budget hierarchy, & loop detector specs.
+- wiki/guides/memory-curation-guide.md: Instructions for future AI agents on organizing & sorting memories neatly.
+- wiki/guides/mcp-integration-guide.md: How external AI clients (Claude Desktop, Cursor, Windsurf) connect via FastMCP.
+- wiki/reference/api-and-mcp-tools.md: Comprehensive listing of 17 FastMCP tools.
+- wiki/reference/database-schema.md: SQLite WAL schema & SHA-256 hash chaining audit log.
