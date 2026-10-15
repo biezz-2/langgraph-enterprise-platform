@@ -74,6 +74,17 @@ export interface MatrixConfiguration {
   created_at?: number | string
 }
 
+export interface CorrelationMatrixCell {
+  source: string
+  target: string
+  weight: number
+  polarity: string
+  handoff_rate: number
+  npmi: number
+  sample_count: number
+  low_data?: boolean
+}
+
 export interface DAGStep {
   id: string
   node_name: string
