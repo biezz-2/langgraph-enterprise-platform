@@ -32,21 +32,8 @@ import {
 } from "lucide-react"
 import { NeuronGraphData, NeuronNode, NeuronLink, ObsidianPhysicsConfig } from "@/types/neuron"
 import { MOCK_GRAPHITI_DATA, processNeuronGraphData } from "@/lib/mockNeuronData"
-
-interface ForceGraphRefMethods {
-  d3Force?: (name: string) => {
-    strength?: (val: number) => void
-    distance?: (val: number) => void
-  }
-  d3ReheatSimulation?: () => void
-  centerAt?: (x: number, y: number, ms: number) => void
-  zoom?: (k: number, ms: number) => void
-  cameraPosition?: (
-    pos?: { x: number; y: number; z: number },
-    lookAt?: unknown,
-    transitionMs?: number
-  ) => { x: number; y: number; z: number }
-}
+import type { ForceGraphMethods as ForceGraph2DMethods } from "react-force-graph-2d"
+import type { ForceGraphMethods as ForceGraph3DMethods } from "react-force-graph-3d"
 
 // Dynamic import for 2D Canvas (Obsidian Classic aesthetic)
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
@@ -80,7 +67,8 @@ const DEFAULT_PHYSICS: ObsidianPhysicsConfig = {
 
 export default function NeuronGraph() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const fgRef = useRef<ForceGraphRefMethods | null>(null)
+  const fg2dRef = useRef<ForceGraph2DMethods | undefined>(undefined)
+  const fg3dRef = useRef<ForceGraph3DMethods | undefined>(undefined)
 
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d")
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -149,44 +137,73 @@ export default function NeuronGraph() {
   }
 
   // Fetch Graphiti bi-temporal neuron data with safe mock fallback
-  const fetchGraph = useCallback(async () => {
-    try {
-      const res = await fetch("/api/graph/graphiti")
-      if (!res.ok) throw new Error(`API status: ${res.status}`)
-      const data = await res.json()
-
-      const rawNodes = data.nodes || []
-      const rawLinks = data.edges || data.links || []
-
-      if (!rawNodes.length) {
-        throw new Error("Data graph kosong dari server, beralih ke mock fallback")
-      }
-
-      const processed = processNeuronGraphData({ nodes: rawNodes, links: rawLinks })
-      setRawData(processed)
-      setIsLiveApi(true)
-      setError(null)
-      updateTimelineBounds(processed.nodes)
-    } catch {
-      // Seamless mock fallback for resilience
-      const fallback = MOCK_GRAPHITI_DATA()
-      const processed = processNeuronGraphData(fallback)
-      setRawData(processed)
-      setIsLiveApi(false)
-      setError(null)
-      updateTimelineBounds(processed.nodes)
-    } finally {
-      setLoading(false)
-    }
+  const loadGraphData = useCallback(() => {
+    setLoading(true)
+    fetch("/api/graph/graphiti")
+      .then((res) => {
+        if (!res.ok) throw new Error(`API status: ${res.status}`)
+        return res.json()
+      })
+      .then((data) => {
+        const rawNodes = data.nodes || []
+        const rawLinks = data.edges || data.links || []
+        if (!rawNodes.length) throw new Error("Data graph kosong dari server")
+        const processed = processNeuronGraphData({ nodes: rawNodes, links: rawLinks })
+        setRawData(processed)
+        setIsLiveApi(true)
+        setError(null)
+        updateTimelineBounds(processed.nodes)
+        setLoading(false)
+      })
+      .catch(() => {
+        const fallback = MOCK_GRAPHITI_DATA()
+        const processed = processNeuronGraphData(fallback)
+        setRawData(processed)
+        setIsLiveApi(false)
+        setError(null)
+        updateTimelineBounds(processed.nodes)
+        setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
-    fetchGraph()
-  }, [fetchGraph])
+    let ignore = false
+
+    fetch("/api/graph/graphiti")
+      .then((res) => {
+        if (!res.ok) throw new Error(`API status: ${res.status}`)
+        return res.json()
+      })
+      .then((data) => {
+        if (ignore) return
+        const rawNodes = data.nodes || []
+        const rawLinks = data.edges || data.links || []
+        if (!rawNodes.length) throw new Error("Data graph kosong dari server")
+        const processed = processNeuronGraphData({ nodes: rawNodes, links: rawLinks })
+        setRawData(processed)
+        setIsLiveApi(true)
+        setError(null)
+        updateTimelineBounds(processed.nodes)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (ignore) return
+        const fallback = MOCK_GRAPHITI_DATA()
+        const processed = processNeuronGraphData(fallback)
+        setRawData(processed)
+        setIsLiveApi(false)
+        setError(null)
+        updateTimelineBounds(processed.nodes)
+        setLoading(false)
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   const handleManualReload = () => {
-    setLoading(true)
-    fetchGraph()
+    loadGraphData()
   }
 
   // Timeline auto-play timer
@@ -315,30 +332,36 @@ export default function NeuronGraph() {
 
   // Apply Obsidian Physics to simulation
   const applyPhysics = useCallback(() => {
-    const fg = fgRef.current
-    if (!fg) return
     try {
-      if (fg.d3Force) {
-        const charge = fg.d3Force("charge")
+      if (viewMode === "2d" && fg2dRef.current) {
+        const charge = fg2dRef.current.d3Force("charge") as { strength?: (v: number) => void } | undefined
         if (charge && typeof charge.strength === "function") {
           charge.strength(physics.repelForce)
         }
-        const link = fg.d3Force("link")
+        const link = fg2dRef.current.d3Force("link") as { distance?: (v: number) => void } | undefined
         if (link && typeof link.distance === "function") {
           link.distance(physics.linkDistance)
         }
-        const center = fg.d3Force("center")
+        const center = fg2dRef.current.d3Force("center") as { strength?: (v: number) => void } | undefined
         if (center && typeof center.strength === "function") {
           center.strength(physics.centerGravity)
         }
-      }
-      if (typeof fg.d3ReheatSimulation === "function") {
-        fg.d3ReheatSimulation()
+        fg2dRef.current.d3ReheatSimulation()
+      } else if (viewMode === "3d" && fg3dRef.current) {
+        const charge = fg3dRef.current.d3Force("charge") as { strength?: (v: number) => void } | undefined
+        if (charge && typeof charge.strength === "function") {
+          charge.strength(physics.repelForce)
+        }
+        const link = fg3dRef.current.d3Force("link") as { distance?: (v: number) => void } | undefined
+        if (link && typeof link.distance === "function") {
+          link.distance(physics.linkDistance)
+        }
+        fg3dRef.current.d3ReheatSimulation()
       }
     } catch {
       // Ignore force errors during transition
     }
-  }, [physics])
+  }, [physics, viewMode])
 
   useEffect(() => {
     applyPhysics()
@@ -351,12 +374,12 @@ export default function NeuronGraph() {
     const distance = 380
 
     const rotate = () => {
-      const fg = fgRef.current
-      if (fg && isRotating && fg.cameraPosition) {
+      if (fg3dRef.current && isRotating) {
         rotationAngleRef.current += 0.0016
         const angle = rotationAngleRef.current
-        fg.cameraPosition({
+        fg3dRef.current.cameraPosition({
           x: distance * Math.sin(angle),
+          y: 0,
           z: distance * Math.cos(angle),
         })
       }
@@ -369,14 +392,12 @@ export default function NeuronGraph() {
 
   // Center camera / viewport
   const handleRecenter = useCallback(() => {
-    const fg = fgRef.current
-    if (!fg) return
     setIsRotating(false)
-    if (viewMode === "2d" && fg.centerAt && fg.zoom) {
-      fg.centerAt(0, 0, 800)
-      fg.zoom(1.2, 800)
-    } else if (viewMode === "3d" && fg.cameraPosition) {
-      fg.cameraPosition({ x: 0, y: 0, z: 360 }, { x: 0, y: 0, z: 0 }, 1000)
+    if (viewMode === "2d" && fg2dRef.current) {
+      fg2dRef.current.centerAt(0, 0, 800)
+      fg2dRef.current.zoom(1.2, 800)
+    } else if (viewMode === "3d" && fg3dRef.current) {
+      fg3dRef.current.cameraPosition({ x: 0, y: 0, z: 360 }, { x: 0, y: 0, z: 0 }, 1000)
     }
   }, [viewMode])
 
@@ -385,25 +406,23 @@ export default function NeuronGraph() {
     (node: NeuronNode) => {
       setSelectedNode(node)
       setIsRotating(false)
-      const fg = fgRef.current
-      if (!fg) return
 
-      if (viewMode === "2d" && fg.centerAt && fg.zoom) {
+      if (viewMode === "2d" && fg2dRef.current) {
         if (typeof node.x === "number" && typeof node.y === "number") {
-          fg.centerAt(node.x, node.y, 700)
-          fg.zoom(1.8, 700)
+          fg2dRef.current.centerAt(node.x, node.y, 700)
+          fg2dRef.current.zoom(1.8, 700)
         }
-      } else if (viewMode === "3d" && fg.cameraPosition && typeof node.x === "number") {
+      } else if (viewMode === "3d" && fg3dRef.current && typeof node.x === "number") {
         const zVal = typeof node.z === "number" ? node.z : 0
         const hyp = Math.hypot(node.x || 0, node.y || 0, zVal) || 1
         const distRatio = 1 + 90 / hyp
-        fg.cameraPosition(
+        fg3dRef.current.cameraPosition(
           {
             x: (node.x || 0) * distRatio,
             y: (node.y || 0) * distRatio + 15,
             z: zVal * distRatio,
           },
-          node,
+          { x: node.x || 0, y: node.y || 0, z: zVal },
           1200
         )
       }
@@ -902,7 +921,7 @@ export default function NeuronGraph() {
           <>
             {viewMode === "2d" ? (
               <ForceGraph2D
-                ref={fgRef as any}
+                ref={fg2dRef}
                 width={dimensions.width}
                 height={dimensions.height}
                 graphData={filteredData}
@@ -943,7 +962,7 @@ export default function NeuronGraph() {
               />
             ) : (
               <ForceGraph3D
-                ref={fgRef as any}
+                ref={fg3dRef}
                 width={dimensions.width}
                 height={dimensions.height}
                 graphData={filteredData}
