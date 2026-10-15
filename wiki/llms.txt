@@ -1,22 +1,24 @@
-# LGP v2.0 Wiki Index for AI Agents & Models
+# AI Index (llms.txt) - Enterprise LangGraph Platform (LGP v2.0)
 
-System: Enterprise LangGraph Platform (LGP v2.0)
-Owner/Team: claude-biezz-2 & Team
+Ini adalah indeks struktural untuk LLM/Agent yang bekerja pada codebase LGP v2.0.
 
-## Summary of Guidelines for AI Agents:
+## Core Architecture
+- [Overview](wiki/overview.md): High-level platform summary and components.
+- [DeepAgents Integration](wiki/concepts/deepagents-integration.md): create_deep_agent orchestration, SubAgent contract conversion, bitemporal AGENTS.md injection, and filesystem sandboxing.
+- [10 Subagents](wiki/concepts/10-subagents.md): Persona, scopes, and pod organization.
+- [Persistence Layer](wiki/concepts/persistence-layer.md): Hybrid SQLite <-> Supabase strategy, RLS, and connection wrapping.
+- [Guardrails](wiki/concepts/guardrails.md): Security, prompt injection shields, and validation.
 
-1. Always format memories using the structured taxonomy format: `Category:ItemName`.
-   - Categories: `Session`, `Subagent`, `Model`, `Architecture`, `Security`, `Telemetry`, `User_Preference`.
-2. Always redact PII before storing facts (`TemporalMemoryStore.redact_pii`).
-3. Link memories to `episode_run_id` or conversation session ID.
-4. When facts change, mark previous facts as obsolete with `invalid_at = timestamp`.
+## Memory & Telemetry
+- [Memory Taxonomy](wiki/concepts/memory-taxonomy.md): Fact classification and curation rules.
+- [Temporal Memory](wiki/reference/database-schema.md): Bi-temporal facts and hash-chain audit logs.
+- [Correlation Matrix](wiki/reference/database-schema.md): 10x10 subagent interaction weights (NPMI, Lift, Handoff).
 
-## Key Index Files:
-- wiki/overview.md: Project architecture summary.
-- wiki/concepts/memory-taxonomy.md: Bi-temporal memory taxonomy & labeling standards.
-- wiki/concepts/10-subagents.md: Specifications for all 10 flagship subagents across 4 pods.
-- wiki/concepts/guardrails.md: Security, budget hierarchy, & loop detector specs.
-- wiki/guides/memory-curation-guide.md: Instructions for future AI agents on organizing & sorting memories neatly.
-- wiki/guides/mcp-integration-guide.md: How external AI clients (Claude Desktop, Cursor, Windsurf) connect via FastMCP.
-- wiki/reference/api-and-mcp-tools.md: Comprehensive listing of 17 FastMCP tools.
-- wiki/reference/database-schema.md: SQLite WAL schema & SHA-256 hash chaining audit log.
+## Guides & Integration
+- [MCP Integration](wiki/guides/mcp-integration-guide.md): FastMCP setup and tool definitions.
+- [Memory Curation](wiki/guides/memory-curation-guide.md): How to seed and clean long-term memory.
+- [Dashboard Guide](wiki/guides/dashboard-guide.md): Next.js observability dashboard operations.
+
+## Technical Reference
+- [Database Schema](wiki/reference/database-schema.md): Detailed table definitions and PostgreSQL/SQLite types.
+- [Admin Tools](wiki/reference/api-and-mcp-tools.md): List of 17 FastMCP admin tools for system control.

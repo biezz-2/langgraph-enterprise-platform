@@ -21,13 +21,60 @@ from packages.guardrails.guards import (
 )
 from packages.telemetry.correlation import CorrelationCalculator
 from packages.memory.temporal import TemporalMemoryStore
+from packages.subagents.contracts import get_deepagents_subagents
+
+try:
+    from deepagents import create_deep_agent
+    from deepagents.backends import StateBackend, FilesystemBackend
+    from langchain_core.messages import HumanMessage, AIMessage
+    DEEPAGENTS_AVAILABLE = True
+except ImportError:
+    DEEPAGENTS_AVAILABLE = False
+    StateBackend = None  # type: ignore
+    FilesystemBackend = None  # type: ignore
+    create_deep_agent = None  # type: ignore
 
 class AtlasOrchestrator:
-    def __init__(self):
+    def __init__(self, deepagent_model: Optional[Any] = None, backend: Optional[Any] = None):
         self.circuit_breaker = CircuitBreaker()
         self.loop_detector = LoopDetector()
         self.budget_manager = InheritedBudgetManager()
         self.correlation_calc = CorrelationCalculator()
+        self.deepagent_model = deepagent_model
+        self.backend = backend or (StateBackend() if DEEPAGENTS_AVAILABLE else None)
+        self._compiled_deepagent = None
+
+    def get_or_build_deep_agent(
+        self,
+        model: Optional[Any] = None,
+        memory_sources: Optional[List[str]] = None,
+        tools: Optional[List[Any]] = None
+    ) -> Optional[Any]:
+        """Menyusun dan mengompilasi runtime DeepAgents untuk Atlas Supervisor."""
+        if not DEEPAGENTS_AVAILABLE:
+            return None
+        target_model = model or self.deepagent_model
+        if target_model is None:
+            return None
+        
+        sources = memory_sources or ["/memory/AGENTS.md"]
+        subagents = get_deepagents_subagents(model=target_model)
+        
+        system_prompt = (
+            "Kamu adalah Atlas — Supervisor Orchestrator LGP v2.0.\n"
+            "Tugasmu adalah menganalisis objective pengguna, mengalokasikan konteks tugas, "
+            "dan mendelegasikan ke subagent terspesialisasi (Clio, Vulcan, Athena, dsb.) via tool task.\n"
+            "Gunakan referensi memory/AGENTS.md untuk panduan konsistensi dan fakta bi-temporal."
+        )
+
+        return create_deep_agent(
+            model=target_model,
+            subagents=subagents,
+            memory=sources,
+            tools=tools or [],
+            backend=self.backend or StateBackend(),
+            system_prompt=system_prompt
+        )
 
     def determine_effort_scaling(self, objective: str, requested_subagents: Optional[List[str]] = None) -> Tuple[int, List[str], bool]:
         if requested_subagents:
@@ -54,7 +101,8 @@ class AtlasOrchestrator:
         thread_id: str,
         objective: str,
         requested_subagents: Optional[List[str]] = None,
-        event_callback: Optional[Any] = None
+        event_callback: Optional[Any] = None,
+        use_deepagents: bool = False
     ) -> Dict[str, Any]:
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         now = time.time()
@@ -75,8 +123,9 @@ class AtlasOrchestrator:
         try:
             # Ensure thread exists
             await db.execute("""
-                INSERT OR IGNORE INTO threads (thread_id, title, metadata_json, created_at, updated_at)
+                INSERT INTO threads (thread_id, title, metadata_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (thread_id) DO NOTHING
             """, (thread_id, objective[:50], "{}", now, now))
 
             await db.execute("""
@@ -124,6 +173,90 @@ class AtlasOrchestrator:
                 await event_callback(evt)
 
         await emit_event("atlas", "node.start", {"objective": objective, "selected_agents": selected_agents})
+
+        # DeepAgents Runtime Path
+        if use_deepagents and DEEPAGENTS_AVAILABLE and self.deepagent_model is not None:
+            agent = self.get_or_build_deep_agent()
+            if agent:
+                db_conn = await get_db_connection()
+                facts = []
+                try:
+                    async with db_conn.execute("SELECT * FROM temporal_facts WHERE invalid_at IS NULL OR invalid_at > ?", (now,)) as cursor:
+                        for row in await cursor.fetchall():
+                            facts.append(TemporalFact(**dict(row)))
+                finally:
+                    await db_conn.close()
+
+                memory_md = TemporalMemoryStore.to_agents_markdown(facts)
+                input_state: Dict[str, Any] = {
+                    "messages": [HumanMessage(content=objective)],
+                }
+                if isinstance(self.backend, StateBackend) or self.backend is None:
+                    input_state["files"] = {
+                        "/memory/AGENTS.md": {
+                            "content": memory_md,
+                            "encoding": "utf-8"
+                        }
+                    }
+
+                t0 = time.time()
+                res = await agent.ainvoke(input_state)
+                duration = time.time() - t0
+
+                messages = res.get("messages", [])
+                final_answer = ""
+                delegates_report_da: List[Dict[str, Any]] = []
+                for msg in messages:
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            if tc.get("name") == "task":
+                                target = tc.get("args", {}).get("subagent", "subagent")
+                                sub_task = tc.get("args", {}).get("task", "")
+                                await emit_event("atlas", "delegate", {"to": target, "task": sub_task})
+                                delegates_report_da.append({
+                                    "subagent": target,
+                                    "status": "completed",
+                                    "task": sub_task
+                                })
+                    if isinstance(msg, AIMessage) and msg.content:
+                        final_answer = str(msg.content)
+
+                if not final_answer:
+                    final_answer = f"Tugas '{objective}' telah selesai diproses via DeepAgents runtime."
+
+                tokens_spent = 20000
+                cost_spent = 0.10
+                atlas_budget.record_usage(tokens_spent, cost_spent)
+
+                await emit_event("atlas", "node.end", {"output": final_answer}, tokens=tokens_spent, cost=cost_spent, latency_ms=duration * 1000)
+
+                db_conn = await get_db_connection()
+                try:
+                    await db_conn.execute("""
+                        UPDATE runs
+                        SET status = 'completed',
+                            budget_spent_json = ?,
+                            updated_at = ?
+                        WHERE run_id = ?
+                    """, (json.dumps({"spent_tokens": atlas_budget.spent_tokens, "spent_usd": atlas_budget.spent_usd}), time.time(), run_id))
+                    await db_conn.commit()
+                finally:
+                    await db_conn.close()
+
+                await record_audit_log("atlas", "run.complete", f"run:{run_id}", {"engine": "deepagents", "total_tokens": atlas_budget.spent_tokens, "total_cost": atlas_budget.spent_usd}, "success")
+
+                return {
+                    "run_id": run_id,
+                    "status": "completed",
+                    "final_answer": final_answer,
+                    "citations": citations,
+                    "delegates_report": delegates_report_da,
+                    "cost_summary": {
+                        "total_tokens": atlas_budget.spent_tokens,
+                        "total_usd": atlas_budget.spent_usd,
+                        "daily_budget_remaining": InheritedBudgetManager.DAILY_HARD_STOP_USD - atlas_budget.spent_usd
+                    }
+                }
 
         # Process each subagent sequentially or with handoffs
         critic_loop_done = False

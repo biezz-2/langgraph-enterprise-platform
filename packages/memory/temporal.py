@@ -1,7 +1,24 @@
 import re
 import time
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, Union
 from packages.core.models import TemporalFact
+
+
+def _to_float(v: Union[float, int, datetime, str, None]) -> Optional[float]:
+    """Normalize datetime/str/float to epoch float for comparison."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, datetime):
+        return v.timestamp()
+    if isinstance(v, str):
+        try:
+            return datetime.fromisoformat(v).timestamp()
+        except ValueError:
+            return float(v)
+    return float(v)
 
 class TemporalMemoryStore:
     EMAIL_PATTERN = re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
@@ -54,17 +71,40 @@ class TemporalMemoryStore:
         tk = as_of_record_time if as_of_record_time is not None else time.time()
 
         for f in facts:
+            created = _to_float(f.created_at)
+            expired = _to_float(f.expired_at)
+            valid = _to_float(f.valid_at)
+            invalid = _to_float(f.invalid_at)
+
             # Record time check: was this fact known to the system at tk?
-            if f.created_at > tk:
+            if created is not None and created > tk:
                 continue
-            if f.expired_at and f.expired_at <= tk:
+            if expired is not None and expired <= tk:
                 continue
 
             # Valid time check: was this fact valid in reality at tv?
-            if f.valid_at > tv:
+            if valid is not None and valid > tv:
                 continue
-            if f.invalid_at and f.invalid_at <= tv:
+            if invalid is not None and invalid <= tv:
                 continue
 
             results.append(f)
         return results
+
+    @classmethod
+    def to_agents_markdown(cls, facts: List[TemporalFact]) -> str:
+        """Render active bi-temporal facts into AGENTS.md format."""
+        if not facts:
+            return "# AGENTS MEMORY\n\n_Belum ada fakta aktif._\n"
+        
+        lines = ["# AGENTS MEMORY (Bi-Temporal Facts)", "", "| Subject | Predicate | Object | Valid Since | Run ID |", "|---|---|---|---|---|"]
+        for f in facts:
+            val_float = _to_float(f.valid_at)
+            vt = datetime.fromtimestamp(val_float, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if val_float else "-"
+            sub = f.subject.replace("|", "\\|")
+            pred = f.predicate.replace("|", "\\|")
+            obj = f.object.replace("|", "\\|")
+            rid = (f.episode_run_id or "-").replace("|", "\\|")
+            lines.append(f"| {sub} | {pred} | {obj} | {vt} | {rid} |")
+        return "\n".join(lines) + "\n"
+

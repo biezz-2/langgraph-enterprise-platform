@@ -9,6 +9,10 @@ from packages.subagents.contracts import TEN_SUBAGENTS_CONTRACTS
 class MemoryTaxonomy:
     CATEGORIES = {
         "Session": "Konteks sesi eksekusi, prompt pengguna, dan histori percakapan",
+        "User_Preference": "Preferensi pengguna, instruksi khusus, dan aturan gaya komunikasi",
+        "Project": "Konteks proyek terdaftar (LGP v2.0, MiroFish Enterprise, OSIS Agora Acta, dll)",
+        "Integration": "Integrasi pihak ketiga & eksternal (SearXNG, 9Router, FastMCP, GitHub, Graphiti Platform)",
+        "Device": "Karakteristik perangkat host (Fujitsu Lifebook, Ubuntu Desktop, kernel, input driver)",
         "Subagent": "Spesifikasi kontrak 10 subagent, role, dan pod",
         "Model": "Model AI yang digunakan per subagent (policy & provider)",
         "Architecture": "Komponen utama LGP v2.0 (Supervisor, CircuitBreaker, FastMCP, WAL DB)",
@@ -24,7 +28,7 @@ class MemoryCuratorEngine:
     @classmethod
     def format_subject(cls, category: str, item_name: str) -> str:
         """Format standar subject memori: Category:ItemName (contoh: Subagent:atlas, Model:frontier)"""
-        cat_clean = category.strip().capitalize()
+        cat_clean = category.strip()
         item_clean = item_name.strip()
         return f"{cat_clean}:{item_clean}"
 

@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Any, Optional
 from packages.core.models import SubagentContract
 
 TEN_SUBAGENTS_CONTRACTS: List[SubagentContract] = [
@@ -225,3 +225,79 @@ TEN_SUBAGENTS_CONTRACTS: List[SubagentContract] = [
 ]
 
 CONTRACTS_MAP: Dict[str, SubagentContract] = {sc.id: sc for sc in TEN_SUBAGENTS_CONTRACTS}
+
+
+# ==========================================
+# DEEPAGENTS INTEGRATION HELPERS
+# ==========================================
+
+try:
+    from deepagents.middleware.subagents import SubAgent
+    from deepagents.middleware.filesystem import FilesystemPermission
+    DEEPAGENTS_AVAILABLE = True
+except ImportError:
+    DEEPAGENTS_AVAILABLE = False
+    SubAgent = dict  # type: ignore
+    FilesystemPermission = dict  # type: ignore
+
+
+def to_deepagents_subagent(
+    contract: SubagentContract,
+    model: Optional[Any] = None,
+    tools: Optional[List[Any]] = None
+) -> "SubAgent":
+    """Mengonversi SubagentContract LGP v2.0 ke format SubAgent DeepAgents."""
+    permissions: List[Any] = []
+    
+    # Sandboxing policy untuk subagent tertentu
+    if DEEPAGENTS_AVAILABLE:
+        if contract.id == "vulcan":
+            permissions = [
+                FilesystemPermission(operations=["read", "write"], paths=["/workspace"], mode="allow"),
+                FilesystemPermission(operations=["write"], paths=["/etc", "/admin", "/root"], mode="deny"),
+            ]
+        elif contract.id == "clio":
+            permissions = [
+                FilesystemPermission(operations=["read"], paths=["/workspace"], mode="allow"),
+                FilesystemPermission(operations=["write"], paths=["/"], mode="deny"),
+            ]
+
+    system_prompt = (
+        f"Kamu adalah subagen {contract.name} (Role: {contract.role}, Pod: {contract.pod}).\n"
+        f"Kemampuan: {', '.join(contract.capabilities)}.\n"
+        f"Trust Level: {contract.trust_level}. Scope Memori: {contract.memory_scope}."
+    )
+
+    subagent_kwargs: Dict[str, Any] = {
+        "name": contract.id,
+        "description": f"{contract.name} ({contract.pod}) — {', '.join(contract.capabilities[:2])}",
+        "system_prompt": system_prompt,
+    }
+
+    if permissions:
+        subagent_kwargs["permissions"] = permissions
+    if model is not None:
+        subagent_kwargs["model"] = model
+    if tools is not None:
+        subagent_kwargs["tools"] = tools
+
+    return SubAgent(**subagent_kwargs) if DEEPAGENTS_AVAILABLE else subagent_kwargs  # type: ignore
+
+
+def get_deepagents_subagents(
+    model: Optional[Any] = None,
+    tools_map: Optional[Dict[str, List[Any]]] = None,
+    exclude_ids: Optional[List[str]] = None
+) -> List["SubAgent"]:
+    """Mengembalikan daftar 10 SubAgent DeepAgents (default excluding root atlas)."""
+    exclude = set(exclude_ids or ["atlas"])
+    tools_map = tools_map or {}
+    
+    result = []
+    for c in TEN_SUBAGENTS_CONTRACTS:
+        if c.id in exclude:
+            continue
+        sub_tools = tools_map.get(c.id)
+        result.append(to_deepagents_subagent(c, model=model, tools=sub_tools))
+    return result
+
