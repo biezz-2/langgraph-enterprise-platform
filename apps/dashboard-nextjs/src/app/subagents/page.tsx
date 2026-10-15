@@ -214,7 +214,7 @@ export default function SubagentsPage() {
                     Tool Grants
                   </span>
                   <div className="mt-1.5 flex flex-wrap gap-1">
-                    {agent.tool_grants.map((tool, i) => (
+                    {(agent.tool_grants || []).map((tool, i) => (
                       <span
                         key={i}
                         className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800/80"
@@ -250,7 +250,7 @@ export default function SubagentsPage() {
                         isClosed ? "text-emerald-400" : "text-rose-400"
                       }`}
                     >
-                      {agent.circuit_breaker.toUpperCase()}
+                      {(agent.circuit_breaker || "closed").toUpperCase()}
                     </span>
                   </div>
                 </div>

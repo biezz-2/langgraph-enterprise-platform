@@ -3,6 +3,7 @@ import json
 import time
 import asyncio
 from typing import Dict, List, Any, Optional
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -274,6 +275,26 @@ async def seed_memory_knowledge():
 @app.get("/api/graph/graphiti")
 async def get_graphiti_neuron_graph():
     return await GraphitiMemoryEngine.build_neuron_graph()
+
+class AddEpisodeApiRequest(BaseModel):
+    name: str
+    episode_body: str
+    source_description: str = "LGP API Ingestion"
+    reference_time: Optional[datetime] = None
+    group_id: Optional[str] = None
+
+@app.post("/api/memory/episodes")
+async def add_memory_episode(req: AddEpisodeApiRequest):
+    res = await GraphitiMemoryEngine.add_episode(
+        name=req.name,
+        episode_body=req.episode_body,
+        source_description=req.source_description,
+        reference_time=req.reference_time,
+        group_id=req.group_id
+    )
+    await record_audit_log("admin", "memory.episode", f"episode:{req.name}", res, "success")
+    GlobalEventBus.get_instance().publish_sync("memory_updated", {"action": "add_episode", "name": req.name})
+    return res
 
 # 8. FastMCP Admin Endpoints
 @app.get("/mcp/admin/tools")

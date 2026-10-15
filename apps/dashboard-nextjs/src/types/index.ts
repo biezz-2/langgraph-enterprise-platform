@@ -111,6 +111,9 @@ export interface RunCheckpoint {
   state_snapshot: Record<string, unknown>
 }
 
+export type RunStep = DAGStep
+export type CheckpointRecord = RunCheckpoint
+
 export interface Run {
   run_id: string
   thread_id: string
