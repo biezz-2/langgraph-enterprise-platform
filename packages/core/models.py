@@ -1,6 +1,7 @@
 import uuid
 import time
-from typing import List, Dict, Any, Optional
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 
 class BudgetEnvelope(BaseModel):
@@ -80,7 +81,7 @@ class TelemetryEvent(BaseModel):
     tokens_out: int = 0
     cost_usd: float = 0.0
     latency_ms: float = 0.0
-    timestamp: float = Field(default_factory=time.time)
+    timestamp: Union[float, datetime, str] = Field(default_factory=time.time)
 
 class CorrelationEdge(BaseModel):
     source_subagent: str
@@ -92,17 +93,17 @@ class CorrelationEdge(BaseModel):
     composite_weight: float = 0.0
     polarity: str = "neutral"  # positive, negative, neutral
     sample_count: int = 0
-    updated_at: float = Field(default_factory=time.time)
+    updated_at: Union[float, datetime, str] = Field(default_factory=time.time)
 
 class TemporalFact(BaseModel):
     fact_id: str = Field(default_factory=lambda: f"fact-{uuid.uuid4().hex[:12]}")
     subject: str
     predicate: str
     object: str
-    valid_at: float = Field(default_factory=time.time)
-    invalid_at: Optional[float] = None
-    created_at: float = Field(default_factory=time.time)
-    expired_at: Optional[float] = None
+    valid_at: Union[float, datetime, str] = Field(default_factory=time.time)
+    invalid_at: Optional[Union[float, datetime, str]] = None
+    created_at: Union[float, datetime, str] = Field(default_factory=time.time)
+    expired_at: Optional[Union[float, datetime, str]] = None
     episode_run_id: Optional[str] = None
     pii_redacted: bool = True
 
@@ -115,7 +116,7 @@ class AuditLogEntry(BaseModel):
     prev_hash: str
     curr_hash: str
     result_status: str
-    created_at: float = Field(default_factory=time.time)
+    created_at: Union[float, datetime, str] = Field(default_factory=time.time)
 
 class HITLInterrupt(BaseModel):
     interrupt_id: str = Field(default_factory=lambda: f"hitl-{uuid.uuid4().hex[:12]}")
@@ -126,5 +127,5 @@ class HITLInterrupt(BaseModel):
     status: str = "pending"  # pending, approved, rejected
     approver: Optional[str] = None
     decision: Optional[str] = None
-    created_at: float = Field(default_factory=time.time)
-    resolved_at: Optional[float] = None
+    created_at: Union[float, datetime, str] = Field(default_factory=time.time)
+    resolved_at: Optional[Union[float, datetime, str]] = None

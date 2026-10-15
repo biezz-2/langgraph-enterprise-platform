@@ -40,6 +40,18 @@ Category:ItemName
    - Contoh Subject: `User_Preference:CodingStyle`, `User_Preference:Language`
    - Predicate Contoh: `PREFERS_STYLE`, `LANG_INDONESIAN`
 
+8. **`Project`**: Konteks proyek terdaftar (LGP v2.0, MiroFish Enterprise, OSIS Agora Acta, dll).
+   - Contoh Subject: `Project:LGP_V2`, `Project:MiroFish`, `Project:OSIS_Agora_Acta`
+   - Predicate Contoh: `SYSTEM_NAME`, `ORCHESTRATOR_PATTERN`, `TECH_STACK`
+
+9. **`Integration`**: Integrasi pihak ketiga & eksternal (SearXNG, 9Router, FastMCP, GitHub, Graphiti Platform).
+   - Contoh Subject: `Integration:SearXNG`, `Integration:9Router`, `Integration:Graphiti_Docker`
+   - Predicate Contoh: `PRIMARY_URL`, `FAILOVER_URL`, `STORAGE_ENGINE`
+
+10. **`Device`**: Karakteristik perangkat keras dan lingkungan sistem operasi host.
+   - Contoh Subject: `Device:Host`
+   - Predicate Contoh: `HARDWARE_MODEL`, `OS_DISTRIBUTION`, `TOUCHPAD_DRIVER`
+
 ## Penyaringan Bi-Temporal ($T_v$ & $T_k$)
 
 - **$T_v$ (Valid Time)**: `valid_at` & `invalid_at` menunjukkan rentang waktu fakta berlaku di dunia nyata.

@@ -14,6 +14,9 @@ Setiap kali Anda mendeteksi informasi penting (seperti preferensi pengguna, mode
   - `Security:` untuk aturan keamanan & sanitasi.
   - `Telemetry:` untuk metrik korelasi & biaya.
   - `User_Preference:` untuk preferensi pengguna & tim.
+  - `Project:` untuk konteks proyek terdaftar (LGP v2.0, MiroFish, OSIS Agora Acta).
+  - `Integration:` untuk konfigurasi integrasi pihak ketiga (SearXNG, 9Router, FastMCP, Graphiti).
+  - `Device:` untuk spesifikasi perangkat host (Fujitsu Lifebook, Ubuntu Desktop, touchpad driver).
 
 ### 2. Gunakan `MemoryCuratorEngine` atau MCP Tool
 - **Melalui Python API Internal**:

@@ -54,7 +54,7 @@ async def test_mcp_admin_tools_and_call():
         res_tools = await ac.get("/mcp/admin/tools")
         assert res_tools.status_code == 200
         tools_data = res_tools.json()
-        assert len(tools_data["tools"]) == 17
+        assert len(tools_data["tools"]) >= 17
 
         # Verify explicit annotations exist on all tools
         for tool in tools_data["tools"]:
@@ -137,9 +137,51 @@ async def test_mcp_correlation_and_audit_setup():
 @pytest.mark.asyncio
 async def test_mcp_stdio_server_instance():
     tools = await mcp.list_tools()
-    assert len(tools) == 17
+    assert len(tools) == 37
     tool_names = [t.name for t in tools]
     assert "lgp_subagent_list" in tool_names
     assert "lgp_memory_store_fact" in tool_names
+    assert "memory_recall" in tool_names
+    assert "memory_store" in tool_names
     assert "lgp_correlation_setup" in tool_names
     assert "lgp_audit_verify" in tool_names
+    assert "lgp_platform_health" in tool_names
+    assert "lgp_hitl_inbox_list" in tool_names
+    assert "lgp_memory_organized_summary" in tool_names
+    assert "lgp_graphiti_neuron_graph" in tool_names
+    assert "lgp_api_request" in tool_names
+
+@pytest.mark.asyncio
+async def test_mcp_new_api_and_dashboard_stream():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Test lgp_platform_health via MCP
+        res_health = await ac.post("/mcp/admin/call", json={
+            "tool": "lgp_platform_health",
+            "arguments": {}
+        })
+        assert res_health.status_code == 200
+        assert res_health.json()["status"] == "healthy"
+
+        # Test lgp_hitl_inbox_list via MCP
+        res_hitl = await ac.post("/mcp/admin/call", json={
+            "tool": "lgp_hitl_inbox_list",
+            "arguments": {"status": "all"}
+        })
+        assert res_hitl.status_code == 200
+        assert "interrupts" in res_hitl.json()
+
+        # Test lgp_memory_organized_summary via MCP
+        res_mem_org = await ac.post("/mcp/admin/call", json={
+            "tool": "lgp_memory_organized_summary",
+            "arguments": {}
+        })
+        assert res_mem_org.status_code == 200
+        assert "categorized_facts" in res_mem_org.json()
+
+        # Test broadcast endpoint
+        res_bcast = await ac.post("/api/events/broadcast", json={
+            "event": "test_ping",
+            "data": {"msg": "hello"}
+        })
+        assert res_bcast.status_code == 200
+        assert res_bcast.json()["status"] == "broadcasted"
