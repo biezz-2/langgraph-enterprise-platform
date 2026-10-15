@@ -33,6 +33,21 @@ import {
 import { NeuronGraphData, NeuronNode, NeuronLink, ObsidianPhysicsConfig } from "@/types/neuron"
 import { MOCK_GRAPHITI_DATA, processNeuronGraphData } from "@/lib/mockNeuronData"
 
+interface ForceGraphRefMethods {
+  d3Force?: (name: string) => {
+    strength?: (val: number) => void
+    distance?: (val: number) => void
+  }
+  d3ReheatSimulation?: () => void
+  centerAt?: (x: number, y: number, ms: number) => void
+  zoom?: (k: number, ms: number) => void
+  cameraPosition?: (
+    pos?: { x: number; y: number; z: number },
+    lookAt?: unknown,
+    transitionMs?: number
+  ) => { x: number; y: number; z: number }
+}
+
 // Dynamic import for 2D Canvas (Obsidian Classic aesthetic)
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -65,8 +80,7 @@ const DEFAULT_PHYSICS: ObsidianPhysicsConfig = {
 
 export default function NeuronGraph() {
   const containerRef = useRef<HTMLDivElement>(null)
-  // Store graph ref
-  const fgRef = useRef<Record<string, unknown> | null>(null)
+  const fgRef = useRef<ForceGraphRefMethods | null>(null)
 
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d")
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
@@ -86,10 +100,10 @@ export default function NeuronGraph() {
 
   // Bi-temporal timeline controls
   const [timeBounds, setTimeBounds] = useState<{ min: number; max: number }>({
-    min: Date.now() - 14 * 86400000,
-    max: Date.now(),
+    min: 0,
+    max: 0,
   })
-  const [timelineTime, setTimelineTime] = useState<number>(Date.now())
+  const [timelineTime, setTimelineTime] = useState<number>(0)
   const [isPlayingTimeline, setIsPlayingTimeline] = useState(false)
   const [copiedCypher, setCopiedCypher] = useState(false)
 
@@ -112,10 +126,31 @@ export default function NeuronGraph() {
     return () => observer.disconnect()
   }, [])
 
+  // Calculate timeline bounds for given nodes
+  const updateTimelineBounds = (nodes: NeuronNode[]) => {
+    const timestamps: number[] = []
+    nodes.forEach((n) => {
+      if (n.valid_at) {
+        const t = new Date(n.valid_at).getTime()
+        if (!isNaN(t)) timestamps.push(t)
+      }
+      if (n.invalid_at) {
+        const t = new Date(n.invalid_at).getTime()
+        if (!isNaN(t)) timestamps.push(t)
+      }
+    })
+
+    if (timestamps.length > 0) {
+      const min = Math.min(...timestamps)
+      const max = Math.max(...timestamps)
+      setTimeBounds({ min, max })
+      setTimelineTime(max)
+    }
+  }
+
   // Fetch Graphiti bi-temporal neuron data with safe mock fallback
   const fetchGraph = useCallback(async () => {
     try {
-      setLoading(true)
       const res = await fetch("/api/graph/graphiti")
       if (!res.ok) throw new Error(`API status: ${res.status}`)
       const data = await res.json()
@@ -131,6 +166,7 @@ export default function NeuronGraph() {
       setRawData(processed)
       setIsLiveApi(true)
       setError(null)
+      updateTimelineBounds(processed.nodes)
     } catch {
       // Seamless mock fallback for resilience
       const fallback = MOCK_GRAPHITI_DATA()
@@ -138,38 +174,24 @@ export default function NeuronGraph() {
       setRawData(processed)
       setIsLiveApi(false)
       setError(null)
+      updateTimelineBounds(processed.nodes)
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    // Initial load
-    const timeout = setTimeout(() => {
-      fetchGraph()
-    }, 0)
-    return () => clearTimeout(timeout)
+    fetchGraph()
   }, [fetchGraph])
 
-  // Extract min and max timestamps for bi-temporal facts
-  useEffect(() => {
-    const timestamps: number[] = []
-    rawData.nodes.forEach((n) => {
-      if (n.valid_at) timestamps.push(new Date(n.valid_at).getTime())
-      if (n.invalid_at) timestamps.push(new Date(n.invalid_at).getTime())
-    })
-
-    if (timestamps.length > 0) {
-      const min = Math.min(...timestamps)
-      const max = Math.max(...timestamps, Date.now())
-      setTimeBounds({ min, max })
-      setTimelineTime(max)
-    }
-  }, [rawData.nodes])
+  const handleManualReload = () => {
+    setLoading(true)
+    fetchGraph()
+  }
 
   // Timeline auto-play timer
   useEffect(() => {
-    if (!isPlayingTimeline) return
+    if (!isPlayingTimeline || timeBounds.min === 0 || timeBounds.max === 0) return
     const interval = setInterval(() => {
       setTimelineTime((prev) => {
         const step = (timeBounds.max - timeBounds.min) / 40
@@ -193,11 +215,11 @@ export default function NeuronGraph() {
           const vTime = n.valid_at ? new Date(n.valid_at).getTime() : 0
           const ivTime = n.invalid_at ? new Date(n.invalid_at).getTime() : Infinity
 
-          if (vTime > timelineTime) {
+          if (timelineTime > 0 && vTime > timelineTime) {
             // Fact not yet born at timeline position
             return null
           }
-          if (timelineTime >= ivTime) {
+          if (timelineTime > 0 && timelineTime >= ivTime) {
             n.status = "invalid"
             n.color = "#f43f5e" // Rose 500
           } else {
@@ -293,7 +315,7 @@ export default function NeuronGraph() {
 
   // Apply Obsidian Physics to simulation
   const applyPhysics = useCallback(() => {
-    const fg = fgRef.current as any
+    const fg = fgRef.current
     if (!fg) return
     try {
       if (fg.d3Force) {
@@ -329,7 +351,7 @@ export default function NeuronGraph() {
     const distance = 380
 
     const rotate = () => {
-      const fg = fgRef.current as any
+      const fg = fgRef.current
       if (fg && isRotating && fg.cameraPosition) {
         rotationAngleRef.current += 0.0016
         const angle = rotationAngleRef.current
@@ -347,7 +369,7 @@ export default function NeuronGraph() {
 
   // Center camera / viewport
   const handleRecenter = useCallback(() => {
-    const fg = fgRef.current as any
+    const fg = fgRef.current
     if (!fg) return
     setIsRotating(false)
     if (viewMode === "2d" && fg.centerAt && fg.zoom) {
@@ -363,7 +385,7 @@ export default function NeuronGraph() {
     (node: NeuronNode) => {
       setSelectedNode(node)
       setIsRotating(false)
-      const fg = fgRef.current as any
+      const fg = fgRef.current
       if (!fg) return
 
       if (viewMode === "2d" && fg.centerAt && fg.zoom) {
@@ -372,13 +394,14 @@ export default function NeuronGraph() {
           fg.zoom(1.8, 700)
         }
       } else if (viewMode === "3d" && fg.cameraPosition && typeof node.x === "number") {
-        const hyp = Math.hypot(node.x || 0, node.y || 0, (node as any).z || 0) || 1
+        const zVal = typeof node.z === "number" ? node.z : 0
+        const hyp = Math.hypot(node.x || 0, node.y || 0, zVal) || 1
         const distRatio = 1 + 90 / hyp
         fg.cameraPosition(
           {
             x: (node.x || 0) * distRatio,
             y: (node.y || 0) * distRatio + 15,
-            z: ((node as any).z || 0) * distRatio,
+            z: zVal * distRatio,
           },
           node,
           1200
@@ -390,9 +413,11 @@ export default function NeuronGraph() {
 
   // 2D Canvas Custom Node Renderer with Obsidian Aesthetic
   const drawNode2D = useCallback(
-    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    (node: NeuronNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const isSelected = selectedNode?.id === node.id
       const isHovered = hoveredNode?.id === node.id
+      const nodeX = node.x || 0
+      const nodeY = node.y || 0
 
       let alpha = 1.0
       let isDimmed = false
@@ -425,8 +450,8 @@ export default function NeuronGraph() {
       // Outer Halo / Synaptic Glow
       if (!isDimmed) {
         ctx.beginPath()
-        ctx.arc(node.x, node.y, r * 1.8, 0, 2 * Math.PI, false)
-        const glowGrad = ctx.createRadialGradient(node.x, node.y, r * 0.7, node.x, node.y, r * 2.2)
+        ctx.arc(nodeX, nodeY, r * 1.8, 0, 2 * Math.PI, false)
+        const glowGrad = ctx.createRadialGradient(nodeX, nodeY, r * 0.7, nodeX, nodeY, r * 2.2)
         glowGrad.addColorStop(0, color + (isSelected ? "66" : "26"))
         glowGrad.addColorStop(1, "transparent")
         ctx.fillStyle = glowGrad
@@ -435,7 +460,7 @@ export default function NeuronGraph() {
 
       // Main Node Body
       ctx.beginPath()
-      ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false)
+      ctx.arc(nodeX, nodeY, r, 0, 2 * Math.PI, false)
       ctx.fillStyle = color
       ctx.shadowColor = isDimmed ? "transparent" : color
       ctx.shadowBlur = isSelected ? 16 : isHovered ? 12 : 6
@@ -444,7 +469,7 @@ export default function NeuronGraph() {
       // Synaptic Ring Border
       ctx.shadowBlur = 0
       ctx.beginPath()
-      ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI, false)
+      ctx.arc(nodeX, nodeY, r + 2, 0, 2 * Math.PI, false)
 
       if (isInvalid) {
         // Obsidian broken ring for invalidated facts
@@ -478,7 +503,7 @@ export default function NeuronGraph() {
         ctx.textBaseline = "middle"
 
         const labelText = node.label || node.id
-        const textY = node.y + r + fontSize * 0.9
+        const textY = nodeY + r + fontSize * 0.9
 
         // Text background badge for clarity
         const textMetrics = ctx.measureText(labelText)
@@ -487,14 +512,14 @@ export default function NeuronGraph() {
 
         ctx.fillStyle = "rgba(9, 9, 11, 0.85)"
         ctx.fillRect(
-          node.x - bWidth / 2,
+          nodeX - bWidth / 2,
           textY - bHeight / 2,
           bWidth,
           bHeight
         )
 
         ctx.fillStyle = isSelected ? "#ffffff" : isHovered ? "#e0e7ff" : "rgba(244, 244, 245, 0.9)"
-        ctx.fillText(labelText, node.x, textY)
+        ctx.fillText(labelText, nodeX, textY)
       }
 
       ctx.restore()
@@ -504,9 +529,9 @@ export default function NeuronGraph() {
 
   // 2D Link Color & Opacity with Spotlight
   const getLinkColor2D = useCallback(
-    (link: any) => {
-      const src = typeof link.source === "object" ? link.source.id : link.source
-      const tgt = typeof link.target === "object" ? link.target.id : link.target
+    (link: NeuronLink) => {
+      const src = typeof link.source === "object" && link.source !== null ? (link.source as NeuronNode).id : String(link.source)
+      const tgt = typeof link.target === "object" && link.target !== null ? (link.target as NeuronNode).id : String(link.target)
       const linkId = link.id || `${src}-${tgt}`
 
       if (!spotlightSets) {
@@ -528,10 +553,10 @@ export default function NeuronGraph() {
 
   // Number of particles per link
   const getLinkParticles = useCallback(
-    (link: any) => {
+    (link: NeuronLink) => {
       if (physics.particleDensity === 0) return 0
-      const src = typeof link.source === "object" ? link.source.id : link.source
-      const tgt = typeof link.target === "object" ? link.target.id : link.target
+      const src = typeof link.source === "object" && link.source !== null ? (link.source as NeuronNode).id : String(link.source)
+      const tgt = typeof link.target === "object" && link.target !== null ? (link.target as NeuronNode).id : String(link.target)
       const linkId = link.id || `${src}-${tgt}`
 
       if (spotlightSets) {
@@ -543,7 +568,8 @@ export default function NeuronGraph() {
   )
 
   // Rich HTML tooltip for 3D Viewport
-  const getNodeTooltip = useCallback((node: any) => {
+  const getNodeTooltip = useCallback((nodeObj: object) => {
+    const node = nodeObj as NeuronNode
     const color = node.color || "#818cf8"
     const group = node.group || node.pod || "General"
     const isInvalid = node.status === "invalid"
@@ -712,7 +738,7 @@ export default function NeuronGraph() {
 
           {/* Reload data */}
           <button
-            onClick={fetchGraph}
+            onClick={handleManualReload}
             className="p-1.5 rounded-lg text-xs font-mono bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition backdrop-blur-md shadow"
             title="Reload from Graphiti API"
           >
@@ -861,7 +887,7 @@ export default function NeuronGraph() {
             <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto mb-2" />
             <p className="text-rose-300 text-xs font-mono mb-3">{error}</p>
             <button
-              onClick={fetchGraph}
+              onClick={handleManualReload}
               className="text-xs px-3.5 py-1.5 bg-rose-500/20 text-rose-300 rounded-lg border border-rose-500/40 hover:bg-rose-500/30 transition font-mono"
             >
               Muat Ulang
@@ -881,27 +907,32 @@ export default function NeuronGraph() {
                 height={dimensions.height}
                 graphData={filteredData}
                 backgroundColor="#09090b"
-                nodeCanvasObject={drawNode2D}
-                nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+                nodeCanvasObject={(node, ctx, scale) => drawNode2D(node as NeuronNode, ctx, scale)}
+                nodePointerAreaPaint={(nodeObj, color, ctx) => {
+                  const node = nodeObj as NeuronNode
                   const r = Math.max(5, (node.size ? node.size / 2.5 : 5) * physics.nodeSizeScale + 4)
                   ctx.beginPath()
-                  ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false)
+                  ctx.arc(node.x || 0, node.y || 0, r, 0, 2 * Math.PI, false)
                   ctx.fillStyle = color
                   ctx.fill()
                 }}
-                linkColor={getLinkColor2D}
-                linkWidth={(link: any) => {
-                  const src = typeof link.source === "object" ? link.source.id : link.source
-                  const tgt = typeof link.target === "object" ? link.target.id : link.target
+                linkColor={(link) => getLinkColor2D(link as NeuronLink)}
+                linkWidth={(linkObj) => {
+                  const link = linkObj as NeuronLink
+                  const src = typeof link.source === "object" && link.source !== null ? (link.source as NeuronNode).id : String(link.source)
+                  const tgt = typeof link.target === "object" && link.target !== null ? (link.target as NeuronNode).id : String(link.target)
                   const isHighlighted = spotlightSets?.links.has(link.id || `${src}-${tgt}`)
                   return isHighlighted ? 2.2 : 1.1
                 }}
-                linkDirectionalParticles={getLinkParticles}
+                linkDirectionalParticles={(link) => getLinkParticles(link as NeuronLink)}
                 linkDirectionalParticleSpeed={physics.particleSpeed}
                 linkDirectionalParticleWidth={2.4}
-                linkDirectionalParticleColor={(link: any) => link.color || "#818cf8"}
-                onNodeHover={(node: any) => setHoveredNode(node as NeuronNode | null)}
-                onNodeClick={(node: any) => handleNodeClick(node as NeuronNode)}
+                linkDirectionalParticleColor={(linkObj) => {
+                  const link = linkObj as NeuronLink
+                  return link.color || "#818cf8"
+                }}
+                onNodeHover={(node) => setHoveredNode((node as NeuronNode) || null)}
+                onNodeClick={(node) => handleNodeClick(node as NeuronNode)}
                 onBackgroundClick={() => {
                   setSelectedNode(null)
                   setHoveredNode(null)
@@ -917,20 +948,32 @@ export default function NeuronGraph() {
                 height={dimensions.height}
                 graphData={filteredData}
                 nodeLabel={getNodeTooltip}
-                nodeColor={(node: any) => node.color || "#818cf8"}
+                nodeColor={(nodeObj) => {
+                  const node = nodeObj as NeuronNode
+                  return node.color || "#818cf8"
+                }}
                 nodeRelSize={4.5}
-                nodeVal={(node: any) => Math.max((node.size || 12) / 3 * physics.nodeSizeScale, 2.5)}
+                nodeVal={(nodeObj) => {
+                  const node = nodeObj as NeuronNode
+                  return Math.max(((node.size || 12) / 3) * physics.nodeSizeScale, 2.5)
+                }}
                 nodeResolution={24}
                 nodeOpacity={0.92}
                 linkWidth={1.2}
-                linkColor={(link: any) => link.color || "rgba(100, 116, 139, 0.4)"}
+                linkColor={(linkObj) => {
+                  const link = linkObj as NeuronLink
+                  return link.color || "rgba(100, 116, 139, 0.4)"
+                }}
                 linkDirectionalParticles={physics.particleDensity}
                 linkDirectionalParticleSpeed={physics.particleSpeed}
                 linkDirectionalParticleWidth={2.0}
-                linkDirectionalParticleColor={(link: any) => link.color || "#818cf8"}
+                linkDirectionalParticleColor={(linkObj) => {
+                  const link = linkObj as NeuronLink
+                  return link.color || "#818cf8"
+                }}
                 backgroundColor="#09090b"
                 showNavInfo={false}
-                onNodeClick={(node: any) => handleNodeClick(node as NeuronNode)}
+                onNodeClick={(node) => handleNodeClick(node as NeuronNode)}
                 cooldownTicks={100}
               />
             )}
@@ -951,13 +994,15 @@ export default function NeuronGraph() {
 
           <div className="flex items-center gap-3">
             <span className="text-indigo-300 font-semibold">
-              {new Date(timelineTime).toLocaleDateString("id-ID", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {timelineTime > 0
+                ? new Date(timelineTime).toLocaleDateString("id-ID", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Live"}
             </span>
 
             {/* Play / Pause timeline button */}
@@ -994,10 +1039,10 @@ export default function NeuronGraph() {
         <div className="relative flex items-center">
           <input
             type="range"
-            min={timeBounds.min}
-            max={timeBounds.max}
-            step={(timeBounds.max - timeBounds.min) / 100}
-            value={timelineTime}
+            min={timeBounds.min || 0}
+            max={timeBounds.max || 100}
+            step={timeBounds.max > timeBounds.min ? (timeBounds.max - timeBounds.min) / 100 : 1}
+            value={timelineTime || timeBounds.max || 0}
             onChange={(e) => {
               setIsPlayingTimeline(false)
               setTimelineTime(Number(e.target.value))
