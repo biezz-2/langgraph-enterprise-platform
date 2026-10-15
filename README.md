@@ -178,7 +178,7 @@ FALKORDB_PORT=6382
 FALKORDB_DB=lgp_graphiti
 
 # ---- 9Router AI Gateway ---------------------------------------------------
-9ROUTER_BASE_URL=https://9router.biezz.my.id/v1
+9ROUTER_BASE_URL=
 9ROUTER_API_KEY=your_9router_key
 EMBEDDING_MODEL=nvidia/nvidia/nv-embedqa-e5-v5
 DEFAULT_INFERENCE_MODEL=anthropic/claude-3-5-sonnet
