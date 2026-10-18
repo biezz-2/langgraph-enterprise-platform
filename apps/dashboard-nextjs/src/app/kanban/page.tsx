@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { FALLBACK_KANBAN_BOARD } from "@/lib/mockData"
 import type { KanbanBoard, KanbanCard, KanbanColumn } from "@/types"
@@ -13,46 +13,130 @@ import {
   Shield,
   ArrowRight,
   RotateCcw,
+  RefreshCw,
   Tag,
   HelpCircle,
   FileCheck,
+  FolderGit2,
 } from "lucide-react"
+
+interface BoardSummary {
+  id: string
+  name: string
+  created_at?: string | number
+  updated_at?: string | number
+}
+
+function normalizeColStatus(name: string): string {
+  const s = (name || "").toUpperCase().replace(/[- ]/g, "_")
+  if (s.includes("BACKLOG")) return "BACKLOG"
+  if (s.includes("PROGRESS")) return "IN_PROGRESS"
+  if (s.includes("REWORK")) return "REWORK"
+  if (s.includes("VALIDATION")) return "IN_VALIDATION"
+  if (s.includes("VALIDATED") || s.includes("DONE")) return "VALIDATED"
+  if (s.includes("IMPLEMENTED")) return "IMPLEMENTED"
+  return s
+}
 
 export default function KanbanPage() {
   const [board, setBoard] = useState<KanbanBoard>(FALLBACK_KANBAN_BOARD)
+  const [boardsList, setBoardsList] = useState<BoardSummary[]>([])
+  const [selectedBoardId, setSelectedBoardId] = useState<string>("")
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isSyncing, setIsSyncing] = useState<boolean>(false)
+
   const [newCardModal, setNewCardModal] = useState<boolean>(false)
-  const [targetColumnId, setTargetColumnId] = useState<string>("col-backlog")
+  const [targetColumnId, setTargetColumnId] = useState<string>("")
   const [cardTitle, setCardTitle] = useState<string>("")
   const [cardDesc, setCardDesc] = useState<string>("")
   const [cardPriority, setCardPriority] = useState<"low" | "medium" | "high" | "critical">("medium")
-  const [cardAssignee, setCardAssignee] = useState<string>("atlas")
+  const [cardAssignee, setCardAssignee] = useState<string>("hermes")
   const [cardPhaseRef, setCardPhaseRef] = useState<string>("p01")
   const [cardSeverity, setCardSeverity] = useState<"BLOCKER" | "MAJOR" | "MINOR" | "">("")
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
     setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 3000)
+    setTimeout(() => setToastMessage(null), 3500)
   }
 
-  useEffect(() => {
-    async function fetchBoard() {
-      try {
-        const res = await fetch("/api/kanban")
-        if (res.ok) {
-          const data = await res.json()
-          if (data && data.columns) {
-            setBoard(data)
+  // 1. Fetch available boards
+  const fetchBoardsList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/kanban/boards")
+      if (res.ok) {
+        const list: BoardSummary[] = await res.json()
+        if (Array.isArray(list) && list.length > 0) {
+          setBoardsList(list)
+          if (!selectedBoardId) {
+            setSelectedBoardId(list[0].id)
           }
         }
-      } catch {
-        // Fallback active
       }
+    } catch (err) {
+      console.warn("Failed to fetch boards list:", err)
     }
-    fetchBoard()
-  }, [])
+  }, [selectedBoardId])
 
-  const moveCard = (cardId: string, currentColId: string, targetColId: string) => {
+  // 2. Fetch specific board by ID
+  const fetchBoard = useCallback(async (boardId?: string) => {
+    setIsLoading(true)
+    try {
+      const url = boardId ? `/api/kanban/boards/${boardId}` : "/api/kanban"
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        if (data && data.columns) {
+          setBoard(data)
+          if (data.id && (!selectedBoardId || selectedBoardId !== data.id)) {
+            setSelectedBoardId(data.id)
+          }
+          if (data.columns.length > 0 && !targetColumnId) {
+            setTargetColumnId(data.columns[0].id)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed fetching board, using fallback:", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [selectedBoardId, targetColumnId])
+
+  useEffect(() => {
+    fetchBoardsList()
+    fetchBoard()
+  }, [fetchBoardsList, fetchBoard])
+
+  const handleSelectBoard = (bId: string) => {
+    setSelectedBoardId(bId)
+    fetchBoard(bId)
+  }
+
+  // 3. Bi-directional Sync with Hermes
+  const handleSyncHermes = async () => {
+    setIsSyncing(true)
+    try {
+      const res = await fetch("/api/kanban/sync", { method: "POST" })
+      if (res.ok) {
+        const syncRes = await res.json()
+        const exported = syncRes?.db_to_hermes?.exported_boards || 0
+        const cards = syncRes?.hermes_to_db?.cards_synced || 0
+        showToast(`Sync Hermes Berhasil: ${exported} boards terdaftar, ${cards} kartu sinkron.`)
+        await fetchBoardsList()
+        await fetchBoard(selectedBoardId)
+      } else {
+        showToast("Gagal sinkronisasi dengan Hermes.")
+      }
+    } catch (e) {
+      showToast("Error sinkronisasi: " + String(e))
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  // 4. Move Card between columns (API + Optimistic UI)
+  const moveCard = async (cardId: string, currentColId: string, targetColId: string) => {
     let cardToMove: KanbanCard | null = null
 
     const updatedColumns = board.columns.map((col) => {
@@ -81,17 +165,33 @@ export default function KanbanPage() {
       })
 
       setBoard({ ...board, columns: finalColumns })
-      showToast(`Kartu dipindahkan ke kolom ${targetColId.replace("col-", "").toUpperCase()}`)
+
+      const targetCol = board.columns.find((c) => c.id === targetColId)
+      showToast(`Kartu dipindahkan ke kolom ${targetCol?.name || targetColId}`)
+
+      // Persist to API
+      try {
+        await fetch(`/api/kanban/cards/${cardId}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to_column_id: targetColId }),
+        })
+      } catch (err) {
+        console.error("Failed persisting card move:", err)
+      }
     }
   }
 
-  const handleAddCard = (e: React.FormEvent) => {
+  // 5. Add Card (API + Optimistic UI)
+  const handleAddCard = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!cardTitle.trim()) return
 
+    const actualTargetColId = targetColumnId || (board.columns.length > 0 ? board.columns[0].id : "col-backlog")
+
     const newCard: KanbanCard = {
-      id: `card-${Date.now().toString(36)}`,
-      column_id: targetColumnId,
+      id: `card-${Date.now()}`,
+      column_id: actualTargetColId,
       title: cardTitle.trim(),
       description: cardDesc.trim(),
       priority: cardPriority,
@@ -102,7 +202,7 @@ export default function KanbanPage() {
     }
 
     const updatedColumns = board.columns.map((col) => {
-      if (col.id === targetColumnId) {
+      if (col.id === actualTargetColId) {
         return {
           ...col,
           cards: [...col.cards, newCard],
@@ -115,16 +215,26 @@ export default function KanbanPage() {
     setNewCardModal(false)
     setCardTitle("")
     setCardDesc("")
-    showToast(`Kartu ${newCard.title} berhasil dibuat pada ${targetColumnId}`)
-  }
+    showToast(`Kartu "${newCard.title}" berhasil ditambahkan & disimpan ke Hermes.`)
 
-  const columnTransitions: Record<string, { next: string; nextLabel: string; prev?: string; prevLabel?: string }> = {
-    "col-backlog": { next: "col-in-progress", nextLabel: "Start" },
-    "col-in-progress": { next: "col-implemented", nextLabel: "Implement", prev: "col-backlog", prevLabel: "Backlog" },
-    "col-implemented": { next: "col-in-validation", nextLabel: "Validate Gate", prev: "col-in-progress", prevLabel: "In Progress" },
-    "col-in-validation": { next: "col-validated", nextLabel: "Pass Gate", prev: "col-rework", prevLabel: "Reject to Rework" },
-    "col-validated": { next: "", nextLabel: "", prev: "col-in-validation", prevLabel: "Re-check" },
-    "col-rework": { next: "col-in-progress", nextLabel: "Fix in Progress", prev: "col-in-validation", prevLabel: "Back" },
+    try {
+      await fetch("/api/kanban/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          column_id: actualTargetColId,
+          title: newCard.title,
+          description: newCard.description,
+          priority: newCard.priority,
+          assigned_to: newCard.assigned_to,
+        }),
+      })
+      if (selectedBoardId) {
+        fetchBoard(selectedBoardId)
+      }
+    } catch (err) {
+      console.error("Failed to persist card creation:", err)
+    }
   }
 
   return (
@@ -132,19 +242,42 @@ export default function KanbanPage() {
       activeModuleTitle="AGENTS.md Phase-Gate Kanban"
       activeModuleSubtitle="Card Lifecycle: BACKLOG → IN PROGRESS → IMPLEMENTED → IN VALIDATION → VALIDATED / REWORK"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Board Selector */}
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs font-mono text-zinc-300">
+            <FolderGit2 className="w-3.5 h-3.5 text-indigo-400" />
+            <select
+              value={selectedBoardId}
+              onChange={(e) => handleSelectBoard(e.target.value)}
+              className="bg-transparent border-none text-zinc-200 text-xs font-mono focus:outline-none cursor-pointer max-w-[200px] truncate"
+            >
+              {boardsList.map((b) => (
+                <option key={b.id} value={b.id} className="bg-zinc-900 text-zinc-200">
+                  {b.name || b.id}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sync with Hermes Button */}
+          <button
+            onClick={handleSyncHermes}
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 hover:bg-zinc-800 text-emerald-400 border border-emerald-800/40 transition disabled:opacity-50"
+            title="Sinkronisasi state board, kartu, dan memory dengan ~/.state/boards Hermes"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing..." : "Sync Hermes"}
+          </button>
+
+          {/* Add Card Button */}
           <button
             onClick={() => {
-              setBoard(FALLBACK_KANBAN_BOARD)
-              showToast("Papan Kanban di-reset ke baseline AGENTS.md")
+              if (board.columns.length > 0 && !targetColumnId) {
+                setTargetColumnId(board.columns[0].id)
+              }
+              setNewCardModal(true)
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
-            Reset Baseline
-          </button>
-          <button
-            onClick={() => setNewCardModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-indigo-600 hover:bg-indigo-500 text-white font-medium shadow transition"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -167,25 +300,31 @@ export default function KanbanPage() {
           <FileCheck className="w-4 h-4 text-indigo-400 flex-shrink-0" />
           <div>
             <span className="font-semibold text-zinc-200">
-              P2 Directive: &quot;IMPLEMENTED&quot; &ne; &quot;DONE&quot;
+              Board Aktif: <span className="text-indigo-300 font-bold">{board.name || selectedBoardId}</span>
             </span>
             <span className="text-zinc-400 text-[11px] block sm:inline sm:ml-2">
-              Selesai build fase baru setengah jalan. Wajib lolos validasi independen Athena (V1-V8) hingga status <strong className="text-emerald-400">VALIDATED</strong>.
+              (P2 Directive: Selesai build fase baru setengah jalan. Wajib lolos validasi independen hingga status <strong className="text-emerald-400">VALIDATED</strong>)
             </span>
           </div>
         </div>
         <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 text-indigo-300 border border-indigo-500/30 whitespace-nowrap">
-          AGENTS.md v1.0.0
+          AGENTS.md &bull; Hermes Persisted
         </span>
       </div>
 
-      {/* 6-Column Phase-Gate Kanban Board */}
+      {/* Dynamic Phase-Gate Kanban Columns */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 items-start">
-        {board.columns.map((col) => {
+        {board.columns.map((col, colIdx) => {
           const colName = col.name
-          const isDoneCol = col.id === "col-validated"
-          const isReworkCol = col.id === "col-rework"
-          const isValidatingCol = col.id === "col-in-validation"
+          const normStatus = normalizeColStatus(colName)
+          const isDoneCol = normStatus === "VALIDATED"
+          const isReworkCol = normStatus === "REWORK"
+          const isValidatingCol = normStatus === "IN_VALIDATION"
+
+          // Determine next and previous columns
+          const prevCol = colIdx > 0 ? board.columns[colIdx - 1] : null
+          const nextCol = colIdx < board.columns.length - 1 ? board.columns[colIdx + 1] : null
+          const reworkCol = board.columns.find((c) => normalizeColStatus(c.name) === "REWORK")
 
           return (
             <div
@@ -226,8 +365,6 @@ export default function KanbanPage() {
               {/* Cards Container */}
               <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1">
                 {col.cards.map((card) => {
-                  const transition = columnTransitions[col.id]
-
                   const sevColor =
                     card.severity === "BLOCKER"
                       ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
@@ -271,30 +408,42 @@ export default function KanbanPage() {
                       {/* Card Footer: Assignee & Move Actions */}
                       <div className="pt-2 border-t border-zinc-800/80 space-y-2">
                         <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                          <span>Subagent:</span>
-                          <span className="text-indigo-400 font-semibold capitalize">
-                            {card.assigned_to || "atlas"}
+                          <span>Assignee:</span>
+                          <span className="text-indigo-400 font-semibold uppercase">
+                            {card.assigned_to || "HERMES"}
                           </span>
                         </div>
 
-                        {/* Fast Move Buttons */}
+                        {/* Fast Move Action Buttons */}
                         <div className="flex items-center gap-1.5 pt-1">
-                          {transition?.prev && (
+                          {prevCol && (
                             <button
-                              onClick={() => moveCard(card.id, col.id, transition.prev!)}
+                              onClick={() => moveCard(card.id, col.id, prevCol.id)}
                               className="flex-1 py-1 px-1.5 rounded bg-zinc-900 hover:bg-zinc-800 text-[10px] font-mono text-zinc-400 border border-zinc-800 truncate"
-                              title={`Pindah ke ${transition.prevLabel}`}
+                              title={`Pindah mundur ke ${prevCol.name}`}
                             >
-                              &larr; {transition.prevLabel}
+                              &larr; {prevCol.name}
                             </button>
                           )}
-                          {transition?.next && (
+
+                          {/* Reject to Rework shortcut on Validation Column */}
+                          {isValidatingCol && reworkCol && (
                             <button
-                              onClick={() => moveCard(card.id, col.id, transition.next)}
-                              className="flex-1 py-1 px-1.5 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-[10px] font-mono text-indigo-300 border border-indigo-500/30 font-medium truncate"
-                              title={`Pindah ke ${transition.nextLabel}`}
+                              onClick={() => moveCard(card.id, col.id, reworkCol.id)}
+                              className="py-1 px-1.5 rounded bg-rose-950/40 hover:bg-rose-900/50 text-[10px] font-mono text-rose-300 border border-rose-800/40 truncate"
+                              title="Tolak hasil gate ke REWORK"
                             >
-                              {transition.nextLabel} &rarr;
+                              Rework
+                            </button>
+                          )}
+
+                          {nextCol && (
+                            <button
+                              onClick={() => moveCard(card.id, col.id, nextCol.id)}
+                              className="flex-1 py-1 px-1.5 rounded bg-indigo-600/20 hover:bg-indigo-600/40 text-[10px] font-mono text-indigo-300 border border-indigo-500/30 font-medium truncate"
+                              title={`Pindah maju ke ${nextCol.name}`}
+                            >
+                              {nextCol.name} &rarr;
                             </button>
                           )}
                         </div>
@@ -324,7 +473,7 @@ export default function KanbanPage() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <Plus className="w-4 h-4 text-indigo-400" />
-                Tambah Kartu Phase-Gate Baru
+                Tambah Kartu Phase-Gate Baru ({board.name})
               </h3>
               <button
                 type="button"
@@ -367,12 +516,11 @@ export default function KanbanPage() {
                     onChange={(e) => setTargetColumnId(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="col-backlog">BACKLOG</option>
-                    <option value="col-in-progress">IN PROGRESS</option>
-                    <option value="col-implemented">IMPLEMENTED</option>
-                    <option value="col-in-validation">IN VALIDATION</option>
-                    <option value="col-validated">VALIDATED</option>
-                    <option value="col-rework">REWORK</option>
+                    {board.columns.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -383,7 +531,7 @@ export default function KanbanPage() {
                     onChange={(e) => setCardAssignee(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-200 focus:outline-none focus:border-indigo-500 capitalize"
                   >
-                    {["atlas", "clio", "vulcan", "athena", "hermes", "mnemosyne", "janus", "themis", "metron", "iris"].map(
+                    {["hermes", "primary_ai", "atlas", "clio", "vulcan", "athena", "mnemosyne", "janus", "themis", "metron", "iris"].map(
                       (agent) => (
                         <option key={agent} value={agent}>
                           {agent}

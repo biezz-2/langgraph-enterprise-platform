@@ -124,18 +124,27 @@ if GRAPHITI_AVAILABLE:
                 self.client = self.fallback_client
 
         async def create(self, input_data: Union[str, list[str]]) -> list[float]:
+            dim = self.config.embedding_dim or 1024
             if not self._using_fallback:
                 try:
-                    result = await self.client.embeddings.create(
-                        input=input_data, model=self.config.embedding_model
-                    )
-                    return result.data[0].embedding[: self.config.embedding_dim]
+                    kwargs = {"input": input_data, "model": self.config.embedding_model}
+                    if "gemini" in self.config.embedding_model or "text-embedding-3" in self.config.embedding_model:
+                        kwargs["dimensions"] = dim
+                    result = await self.client.embeddings.create(**kwargs)
+                    emb = result.data[0].embedding
+                    if len(emb) > dim:
+                        emb = emb[:dim]
+                    return emb
                 except Exception as e:
                     self._activate_fallback(e)
-            result = await self.fallback_client.embeddings.create(
-                input=input_data, model=self.fallback_config.embedding_model
-            )
-            return result.data[0].embedding[: self.fallback_config.embedding_dim]
+            fb_kwargs = {"input": input_data, "model": self.fallback_config.embedding_model}
+            if "text-embedding-3" in self.fallback_config.embedding_model:
+                fb_kwargs["dimensions"] = dim
+            result = await self.fallback_client.embeddings.create(**fb_kwargs)
+            emb = result.data[0].embedding
+            if len(emb) > dim:
+                emb = emb[:dim]
+            return emb
 
         async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
             if not self._using_fallback:
@@ -166,9 +175,9 @@ class GraphitiMemoryEngine:
     ROUTER_BASE_URL = resolve_router_base_url()
     ROUTER_API_KEY = os.environ.get("ROUTER_API_KEY", os.environ.get("NINE_ROUTER_API_KEY", ""))
     ROUTER_LLM_MODEL = os.environ.get("ROUTER_LLM_MODEL", "hermes")
-    ROUTER_EMBED_PRIMARY = os.environ.get("ROUTER_EMBED_PRIMARY", "nvidia/nvidia/nv-embedqa-e5-v5")
+    ROUTER_EMBED_PRIMARY = os.environ.get("ROUTER_EMBED_PRIMARY", "gemini/gemini-embedding-2-preview")
     ROUTER_EMBED_FALLBACK = os.environ.get("ROUTER_EMBED_FALLBACK", "openrouter/openai/text-embedding-3-small")
-    EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
+    EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
     _driver: Optional[Any] = None
     _driver_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -254,6 +263,13 @@ class GraphitiMemoryEngine:
             except Exception as idx_err:
                 logger.debug("Indices/constraints info: %s", idx_err)
 
+            # Explicit FalkorDB Vector Indices per embedding_space_id (Remediation F-004 & K-1)
+            try:
+                from packages.memory.embedding_fabric import ParallelEmbeddingFabric
+                await ParallelEmbeddingFabric.ensure_vector_indexes(driver, dim=cls.EMBEDDING_DIM)
+            except Exception as vec_err:
+                logger.debug("Vector indices init notice: %s", vec_err)
+
             g = Graphiti(
                 graph_driver=driver,
                 llm_client=llm_client,
@@ -306,9 +322,10 @@ class GraphitiMemoryEngine:
         try:
             db = await get_db_connection()
             fact_id = f"fact-ep-{int(time.time() * 1000)}"
+            now_str = datetime.now(timezone.utc).isoformat()
             async with db.execute(
-                "INSERT INTO temporal_facts (fact_id, subject, predicate, object, valid_at, group_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (fact_id, name, "EPISODE_RECORD", episode_body[:500], ref_time.isoformat(), group_id or "default", "active")
+                "INSERT INTO temporal_facts (fact_id, subject, predicate, object, valid_at, created_at, episode_run_id, pii_redacted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (fact_id, name, "EPISODE_RECORD", episode_body[:500], ref_time.isoformat(), now_str, group_id or "default", 0)
             ):
                 await db.commit()
             await db.close()

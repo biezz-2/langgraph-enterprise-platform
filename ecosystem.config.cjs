@@ -53,7 +53,7 @@ module.exports = {
     {
       name: "lgp-dashboard",
       script: "node_modules/next/dist/bin/next",
-      args: "start -p 3000",
+      args: "start -p 3002",
       cwd: "/home/biezz/Documents/Project/coding/langgraph/apps/dashboard-nextjs",
       interpreter: "node",
       autorestart: true,
@@ -61,7 +61,7 @@ module.exports = {
       max_memory_restart: "500M",
       env: {
         NODE_ENV: "production",
-        PORT: "3000"
+        PORT: "3002"
       }
     }
   ]

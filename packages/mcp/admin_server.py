@@ -473,6 +473,17 @@ class AdminMCPServer:
         }
     },
     {
+        "name": "lgp_kanban_sync_hermes",
+        "description": "Menjalankan sinkronisasi dua arah penuh antara LangGraph Kanban DB dan filesystem ~/.state/boards serta memory Hermes.",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False
+        },
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
         "name": "lgp_matrix_get_config",
         "description": "Mengambil konfigurasi matriks korelasi saat ini (alpha, beta, gamma, n_min, enabled status).",
         "annotations": {
@@ -1082,7 +1093,23 @@ class AdminMCPServer:
                 )
                 await db.commit()
                 GlobalEventBus.get_instance().publish_sync("kanban_updated", {"card_id": card_id})
+                try:
+                    from apps.api.hermes_sync import sync_db_boards_to_hermes
+                    await sync_db_boards_to_hermes(db)
+                except Exception as e:
+                    print(f"[AdminMCP] Hermes sync after move failed: {e}")
                 return {"status": "moved", "card_id": card_id, "to_column": to_column_name}
+            finally:
+                await db.close()
+
+        elif tool_name == "lgp_kanban_sync_hermes":
+            db = await get_db_connection()
+            try:
+                from apps.api.hermes_sync import run_full_sync
+                result = await run_full_sync(db)
+                return result
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
             finally:
                 await db.close()
 

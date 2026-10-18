@@ -4,7 +4,7 @@ Dokumen ini adalah panduan pengguna untuk Dashboard Enterprise LangGraph Platfor
 
 ## 1. Akses Dashboard
 Dashboard berjalan sebagai aplikasi Next.js yang terhubung ke FastAPI backend melalui proxy `/api/*`.
-- **URL Default**: `http://localhost:3000`
+- **URL Default**: `http://localhost:3002`
 - **Data Source**: Terdeteksi secara otomatis sebagai `SUPABASE` (Enterprise) atau `LOCAL` (SQLite fallback).
 
 ## 2. Fitur Utama (Tab Navigasi)

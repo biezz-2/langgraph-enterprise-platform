@@ -2,7 +2,7 @@ import os
 import json
 import time
 import asyncio
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -18,13 +18,21 @@ from packages.mcp.admin_server import AdminMCPServer
 from packages.telemetry.correlation import CorrelationCalculator, CorrelationEdge
 from packages.memory.curator import MemoryCuratorEngine
 from packages.memory.graphiti import GraphitiMemoryEngine
+from packages.memory.embedding_fabric import ParallelEmbeddingFabric, EmbeddingVector
 
 from contextlib import asynccontextmanager
+from apps.api.hermes_sync import run_full_sync, sync_db_boards_to_hermes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await record_audit_log("system", "platform.startup", "platform:lifecycle", {}, "success")
+    try:
+        db = await get_db_connection()
+        await run_full_sync(db)
+        await db.close()
+    except Exception as e:
+        print(f"[HERMES_SYNC] Initial sync error: {e}")
     yield
 
 app = FastAPI(
@@ -34,9 +42,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+cors_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+if cors_origins_env:
+    allowed_origins = [orig.strip() for orig in cors_origins_env.split(",") if orig.strip()]
+else:
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3002",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3002",
+        "https://dashboard-langgraph.biezz.my.id",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +65,7 @@ app.add_middleware(
 orchestrator = AtlasOrchestrator()
 mcp_server = AdminMCPServer()
 correlation_calc = CorrelationCalculator()
+embedding_fabric = ParallelEmbeddingFabric()
 
 # In-memory event queues for live SSE per run
 run_event_queues: Dict[str, asyncio.Queue] = {}
@@ -320,11 +341,47 @@ class CreateCardRequest(BaseModel):
 class MoveCardRequest(BaseModel):
     to_column_id: str
 
+@app.get("/api/kanban")
+async def get_active_kanban(board_id: Optional[str] = None):
+    """Retrieve active Kanban board with columns and cards for Dashboard."""
+    db = await get_db_connection()
+    try:
+        if not board_id:
+            async with db.execute("SELECT id FROM kanban_boards ORDER BY updated_at DESC LIMIT 1") as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    board_id = row["id"]
+                else:
+                    # Run sync to pull from Hermes if DB empty
+                    await run_full_sync(db)
+                    async with db.execute("SELECT id FROM kanban_boards ORDER BY updated_at DESC LIMIT 1") as c2:
+                        r2 = await c2.fetchone()
+                        if r2:
+                            board_id = r2["id"]
+                        else:
+                            raise HTTPException(status_code=404, detail="No Kanban board found")
+        
+        return await get_kanban_board(str(board_id))
+    finally:
+        await db.close()
+
+@app.post("/api/kanban/sync")
+async def sync_kanban_hermes():
+    """Trigger full bidirectional synchronization with Hermes boards & memory."""
+    db = await get_db_connection()
+    try:
+        res = await run_full_sync(db)
+        await record_audit_log("admin", "kanban.sync.hermes", "kanban", res, "success")
+        GlobalEventBus.get_instance().publish_sync("kanban_updated", {"type": "full_sync"})
+        return res
+    finally:
+        await db.close()
+
 @app.get("/api/kanban/boards")
 async def list_kanban_boards():
     db = await get_db_connection()
     try:
-        async with db.execute("SELECT * FROM kanban_boards ORDER BY created_at DESC") as cursor:
+        async with db.execute("SELECT * FROM kanban_boards ORDER BY updated_at DESC") as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
     finally:
@@ -349,7 +406,18 @@ async def get_kanban_board(board_id: str):
             async with db.execute("SELECT * FROM kanban_cards WHERE column_id = ? ORDER BY created_at ASC", (col["id"],)) as cursor:
                 col["cards"] = [dict(r) for r in await cursor.fetchall()]
         
-        return {**dict(board_row), "columns": columns}
+        b_data = dict(board_row)
+        # Format datetimes
+        for k in ["created_at", "updated_at"]:
+            if isinstance(b_data.get(k), datetime):
+                b_data[k] = b_data[k].isoformat()
+        for col in columns:
+            for card in col.get("cards", []):
+                for k in ["created_at", "updated_at"]:
+                    if isinstance(card.get(k), datetime):
+                        card[k] = card[k].isoformat()
+
+        return {**b_data, "columns": columns}
     finally:
         await db.close()
 
@@ -358,19 +426,21 @@ async def create_kanban_board(req: CreateBoardRequest):
     db = await get_db_connection()
     try:
         board_id = f"board-{int(time.time() * 1000)}"
+        now_ts = time.time()
         await db.execute(
             "INSERT INTO kanban_boards (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (board_id, req.name, time.time(), time.time())
+            (board_id, req.name, now_ts, now_ts)
         )
         
         for i, col in enumerate(req.columns):
-            col_id = f"col-{int(time.time() * 1000)}-{i}"
+            col_id = f"col-{int(now_ts * 1000)}-{i}"
             await db.execute(
                 "INSERT INTO kanban_columns (id, board_id, name, order_idx) VALUES (?, ?, ?, ?)",
                 (col_id, board_id, col["name"], i)
             )
         
         await db.commit()
+        await sync_db_boards_to_hermes(db)
         await record_audit_log("admin", "kanban.board.create", "kanban", {"board_id": board_id}, "success")
         GlobalEventBus.get_instance().publish_sync("kanban_updated", {"board_id": board_id})
         return {"board_id": board_id, "status": "created"}
@@ -382,11 +452,13 @@ async def create_kanban_card(req: CreateCardRequest):
     db = await get_db_connection()
     try:
         card_id = f"card-{int(time.time() * 1000)}"
+        now_ts = time.time()
         await db.execute(
             "INSERT INTO kanban_cards (id, column_id, title, description, priority, assigned_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (card_id, req.column_id, req.title, req.description, req.priority, req.assigned_to, time.time(), time.time())
+            (card_id, req.column_id, req.title, req.description, req.priority, req.assigned_to, now_ts, now_ts)
         )
         await db.commit()
+        await sync_db_boards_to_hermes(db)
         await record_audit_log("admin", "kanban.card.create", "kanban", {"card_id": card_id}, "success")
         GlobalEventBus.get_instance().publish_sync("kanban_updated", {"card_id": card_id})
         return {"card_id": card_id, "status": "created"}
@@ -397,11 +469,13 @@ async def create_kanban_card(req: CreateCardRequest):
 async def move_kanban_card(card_id: str, req: MoveCardRequest):
     db = await get_db_connection()
     try:
+        now_ts = time.time()
         await db.execute(
             "UPDATE kanban_cards SET column_id = ?, updated_at = ? WHERE id = ?",
-            (req.to_column_id, time.time(), card_id)
+            (req.to_column_id, now_ts, card_id)
         )
         await db.commit()
+        await sync_db_boards_to_hermes(db)
         await record_audit_log("admin", "kanban.card.move", "kanban", {"card_id": card_id}, "success")
         GlobalEventBus.get_instance().publish_sync("kanban_updated", {"card_id": card_id})
         return {"status": "moved"}
@@ -625,4 +699,162 @@ async def websocket_dashboard_endpoint(websocket: WebSocket):
         heartbeat_task.cancel()
         GlobalEventBus.get_instance().unsubscribe(queue)
         ws_dashboard_manager.disconnect(websocket)
+
+
+# -------------------------------------------------------------
+# 11. Parallel Multi-Provider Embedding Fabric Endpoints
+# -------------------------------------------------------------
+
+class EmbeddingRequest(BaseModel):
+    input: Union[str, List[str]]
+    pattern: str = "single"  # "single" | "race" | "shard" | "ensemble"
+    model: Optional[str] = "gemini/gemini-embedding-2-preview"
+    target_dim: Optional[int] = 1024
+    candidate_models: Optional[List[str]] = None
+    sharding_models: Optional[List[str]] = None
+    ensemble_models: Optional[List[str]] = None
+
+class RrfFusionRequest(BaseModel):
+    ranked_lists: List[List[Dict[str, Any]]]
+    k: int = 60
+    id_key: str = "id"
+
+@app.post("/api/embedding/embed")
+async def embed_endpoint(req: EmbeddingRequest):
+    try:
+        texts = [req.input] if isinstance(req.input, str) else req.input
+        pattern = req.pattern.lower()
+        if pattern == "race":
+            candidates = req.candidate_models or ["gemini/gemini-embedding-2-preview", "openrouter/openai/text-embedding-3-small"]
+            evs = await asyncio.gather(*[
+                embedding_fabric.embed_race(t, candidate_models=candidates, target_dim=req.target_dim or 1024)
+                for t in texts
+            ])
+            data = [r.to_dict() for r in evs]
+        elif pattern == "shard":
+            shards = req.sharding_models or ["gemini/gemini-embedding-2-preview", "nvidia/nvidia/nv-embedqa-e5-v5", "mistral/mistral-embed"]
+            evs = await embedding_fabric.embed_shard_hash(texts, sharding_models=shards, target_dim=req.target_dim or 1024)
+            data = [r.to_dict() for r in evs]
+        elif pattern == "ensemble":
+            models = req.ensemble_models or ["gemini/gemini-embedding-2-preview", "openrouter/openai/text-embedding-3-small"]
+            ev_lists = await asyncio.gather(*[
+                embedding_fabric.embed_ensemble(t, ensemble_models=models, target_dim=req.target_dim or 1024)
+                for t in texts
+            ])
+            data = [[r.to_dict() for r in el] for el in ev_lists]
+        else:
+            model_id = req.model or "gemini/gemini-embedding-2-preview"
+            evs = await asyncio.gather(*[
+                embedding_fabric.embed_single(t, model_id=model_id, target_dim=req.target_dim or 1024)
+                for t in texts
+            ])
+            data = [r.to_dict() for r in evs]
+
+        GlobalEventBus.get_instance().publish_sync("embedding_generated", {
+            "event": "embedding_generated",
+            "pattern": pattern,
+            "items_count": len(texts),
+            "timestamp": time.time(),
+        })
+        return {"status": "success", "pattern": pattern, "data": data}
+    except Exception as e:
+        print(f"[EMBEDDING_API] embed error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/embedding/models")
+async def get_embedding_models():
+    models_info = []
+    for model_id, spec in embedding_fabric.registry.items():
+        is_tripped = embedding_fabric.circuit_breaker.is_open(model_id)
+        models_info.append({
+            "model_id": spec.model_id,
+            "provider": spec.provider,
+            "raw_dim": spec.raw_dim,
+            "default_target_dim": spec.default_target_dim,
+            "supports_mrl": spec.supports_mrl,
+            "auto_normalized": spec.auto_normalized,
+            "is_free": spec.is_free,
+            "logs_prompts": spec.logs_prompts,
+            "rpm": spec.rpm,
+            "rpd": spec.rpd,
+            "circuit_state": "OPEN" if is_tripped else "CLOSED",
+            "description": spec.description,
+        })
+    return {"status": "success", "models": models_info, "total": len(models_info)}
+
+@app.get("/api/embedding/telemetry")
+async def get_embedding_telemetry():
+    return {"status": "success", "telemetry": embedding_fabric.telemetry.get_summary()}
+
+@app.get("/api/embedding/atlas")
+async def get_embedding_atlas(limit: int = 50):
+    try:
+        db = await get_db_connection()
+        facts = []
+        try:
+            async with db.execute("SELECT id, text_content, memory_category, valid_at FROM temporal_facts ORDER BY created_at DESC LIMIT ?", (limit,)) as cursor:
+                rows = await cursor.fetchall()
+                for r in rows:
+                    facts.append({"id": str(r["id"]), "text": r["text_content"], "category": r["memory_category"] or "general"})
+        except Exception:
+            pass
+
+        if not facts:
+            facts = [
+                {"id": "node-1", "text": "LangGraph Supervisor multi-agent orchestration architecture", "category": "architecture"},
+                {"id": "node-2", "text": "Bi-temporal memory graph with FalkorDB openCypher vector indexes", "category": "memory"},
+                {"id": "node-3", "text": "Parallel Multi-Provider Embedding Fabric with 9Router gateway", "category": "embedding"},
+                {"id": "node-4", "text": "Matryoshka Representation Learning dimension truncation to 1024", "category": "embedding"},
+                {"id": "node-5", "text": "Obsidian Neuron Graph dynamic clustering and degree centrality", "category": "visualization"},
+            ]
+
+        texts = [f["text"] for f in facts]
+        ids = [f["id"] for f in facts]
+        labels = [f["category"] for f in facts]
+        embs = await asyncio.gather(*[
+            embedding_fabric.embed_single(t, model_id="gemini/gemini-embedding-2-preview", target_dim=1024)
+            for t in texts
+        ])
+        vectors = [e.vector for e in embs]
+        spaces = [e.embedding_space_id for e in embs]
+        nodes = embedding_fabric.project_embeddings_2d(vectors, labels=labels, ids=ids, spaces=spaces)
+
+        for i, node in enumerate(nodes):
+            node["text"] = texts[i]
+            node["model_id"] = embs[i].model_id
+
+        return {"status": "success", "total_nodes": len(nodes), "nodes": nodes}
+    except Exception as e:
+        print(f"[EMBEDDING_API] atlas error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class UmapProjectionRequest(BaseModel):
+    vectors: List[List[float]]
+    ids: Optional[List[str]] = None
+    labels: Optional[List[str]] = None
+    spaces: Optional[List[str]] = None
+
+@app.post("/api/embedding/umap")
+async def project_umap_endpoint(req: UmapProjectionRequest):
+    try:
+        nodes = embedding_fabric.project_embeddings_2d(
+            req.vectors,
+            labels=req.labels,
+            ids=req.ids,
+            spaces=req.spaces
+        )
+        return {"status": "success", "count": len(nodes), "nodes": nodes}
+    except Exception as e:
+        print(f"[EMBEDDING_API] umap error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/embedding/fuse")
+async def fuse_endpoint(req: RrfFusionRequest):
+    try:
+        fused = embedding_fabric.rrf_fusion(req.ranked_lists, k=req.k, id_key=req.id_key)
+        return {"status": "success", "fused_results": fused, "total": len(fused)}
+    except Exception as e:
+        print(f"[EMBEDDING_API] fuse error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 

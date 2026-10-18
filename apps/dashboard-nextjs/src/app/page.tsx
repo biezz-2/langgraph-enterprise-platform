@@ -97,22 +97,48 @@ export default function OverviewPage() {
     async function loadData() {
       try {
         const hRes = await fetch("/api/health")
-        if (hRes.ok) setHealth(await hRes.json())
+        if (hRes.ok) {
+          const hData = await hRes.json()
+          if (hData && typeof hData === "object") {
+            setHealth((prev) => ({ ...prev, ...hData }))
+          }
+        }
       } catch {}
 
       try {
         const sRes = await fetch("/api/subagents")
-        if (sRes.ok) setSubagents(await sRes.json())
+        if (sRes.ok) {
+          const sData = await sRes.json()
+          if (Array.isArray(sData)) {
+            setSubagents(sData)
+          } else if (sData && Array.isArray(sData.subagents)) {
+            setSubagents(sData.subagents)
+          }
+        }
       } catch {}
 
       try {
         const rRes = await fetch("/api/runs")
-        if (rRes.ok) setRecentRuns(await rRes.json())
+        if (rRes.ok) {
+          const rData = await rRes.json()
+          if (Array.isArray(rData)) {
+            setRecentRuns(rData)
+          } else if (rData && Array.isArray(rData.runs)) {
+            setRecentRuns(rData.runs)
+          }
+        }
       } catch {}
 
       try {
         const hitlRes = await fetch("/api/hitl")
-        if (hitlRes.ok) setHitlItems(await hitlRes.json())
+        if (hitlRes.ok) {
+          const hitlData = await hitlRes.json()
+          if (Array.isArray(hitlData)) {
+            setHitlItems(hitlData)
+          } else if (hitlData && Array.isArray(hitlData.items)) {
+            setHitlItems(hitlData.items)
+          }
+        }
       } catch {}
     }
     loadData()
@@ -444,7 +470,7 @@ export default function OverviewPage() {
                         <span className="text-[9px] text-zinc-500">({agent.pod})</span>
                       </div>
                       <p className="text-[10px] text-zinc-400 mt-0.5">
-                        Cap: ${agent.budget_config?.max_usd?.toFixed(2) || "10.00"} &bull; Trust: {agent.trust_level}
+                        Cap: ${typeof agent.budget_config?.max_usd === "number" ? agent.budget_config.max_usd.toFixed(2) : "10.00"} &bull; Trust: {agent.trust_level || "Medium"}
                       </p>
                     </div>
 
