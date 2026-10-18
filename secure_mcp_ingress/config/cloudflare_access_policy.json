@@ -1,0 +1,135 @@
+{
+  "$schema": "https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/",
+  "metadata": {
+    "project": "secure_mcp_ingress",
+    "subagent": "SA1_INGRESS_NETWORK",
+    "description": "Cloudflare Zero Trust Access & WAF Edge Security Specification for MCP Ingress"
+  },
+  "cloudflare_access": {
+    "application": {
+      "name": "Secure MCP Server Gateway",
+      "domain": "mcp.domainanda.com",
+      "type": "self_hosted",
+      "session_duration": "24h",
+      "auto_redirect_to_identity": false,
+      "enable_binding_cookie": false,
+      "http_only_cookie_attribute": true,
+      "same_site_cookie_attribute": "strict",
+      "path_cookie_attribute": true,
+      "custom_deny_message": "Access Denied: Valid CF-Access Service Token Required for MCP Ingress.",
+      "cors_headers": {
+        "allowed_origins": [
+          "https://mcp.domainanda.com"
+        ],
+        "allowed_methods": [
+          "GET",
+          "POST",
+          "OPTIONS"
+        ],
+        "allowed_headers": [
+          "Content-Type",
+          "Authorization",
+          "CF-Access-Client-Id",
+          "CF-Access-Client-Secret"
+        ],
+        "allow_all_origins": false,
+        "allow_credentials": true,
+        "max_age": 86400
+      }
+    },
+    "policies": [
+      {
+        "name": "Enforce-M2M-Service-Token",
+        "decision": "non_identity",
+        "description": "Mandatory Machine-to-Machine authentication policy using Cloudflare Access Service Tokens for AI Agents and automated callers",
+        "include": [
+          {
+            "service_token": {
+              "token_id": "REPLACE_WITH_CF_ACCESS_SERVICE_TOKEN_UUID"
+            }
+          }
+        ],
+        "require": [],
+        "exclude": [],
+        "purpose_justification_required": false
+      }
+    ],
+    "service_token_specification": {
+      "name": "mcp-ai-agent-service-token",
+      "duration": "8760h",
+      "header_mapping": {
+        "client_id_header": "CF-Access-Client-Id",
+        "client_secret_header": "CF-Access-Client-Secret",
+        "edge_jwt_assertion_header": "Cf-Access-Jwt-Assertion"
+      },
+      "verification_endpoint": "https://domainanda.cloudflareaccess.com/cdn-cgi/access/certs",
+      "token_rotation_period_days": 90
+    }
+  },
+  "edge_waf_rules": [
+    {
+      "id": "waf-mcp-require-service-token",
+      "description": "Block inbound requests to mcp.domainanda.com missing Cloudflare Access credentials",
+      "action": "block",
+      "enabled": true,
+      "expression": "(http.host eq \"mcp.domainanda.com\" and not (http.request.headers[\"cf-access-client-id\"][0] ne \"\" and http.request.headers[\"cf-access-client-secret\"][0] ne \"\"))"
+    },
+    {
+      "id": "waf-mcp-payload-sanitization",
+      "description": "Sanitize and block directory traversal, shell escape, or malicious probing payloads targeting MCP endpoints",
+      "action": "block",
+      "enabled": true,
+      "expression": "(http.host eq \"mcp.domainanda.com\" and (raw.http.request.uri.path contains \"..\" or raw.http.request.uri.path contains \"/etc/\" or raw.http.request.uri.path contains \"/proc/\" or http.request.uri.query contains \"..\"))"
+    },
+    {
+      "id": "waf-mcp-restrict-methods",
+      "description": "Allow only GET, POST, and OPTIONS HTTP methods on MCP ingress",
+      "action": "block",
+      "enabled": true,
+      "expression": "(http.host eq \"mcp.domainanda.com\" and not (http.request.method in {\"GET\" \"POST\" \"OPTIONS\"}))"
+    }
+  ],
+  "rate_limiting_and_ddos": {
+    "rate_limiting_ruleset": [
+      {
+        "id": "rl-mcp-token-burst-protection",
+        "description": "Protect MCP Gateway against volumetric abuse per Service Token ID and Client IP",
+        "action": "block",
+        "enabled": true,
+        "characteristics": [
+          "http.request.headers[\"cf-access-client-id\"][0]",
+          "ip.src"
+        ],
+        "period_seconds": 60,
+        "requests_per_period": 120,
+        "mitigation_timeout_seconds": 60,
+        "response": {
+          "status_code": 429,
+          "content_type": "application/json",
+          "body": "{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded on Secure MCP Ingress. Retry in 60s.\"}"
+        }
+      }
+    ],
+    "ddos_profile": {
+      "sensitivity_level": "high",
+      "syn_flood_protection": true,
+      "http_flood_mitigation": "managed_challenge_for_anomalous_traffic"
+    }
+  },
+  "edge_tls_profile": {
+    "minimum_tls_version": "1.3",
+    "http3_quic_enabled": true,
+    "zero_rtt": false,
+    "ciphers": [
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_CHACHA20_POLY1305_SHA256"
+    ],
+    "hsts": {
+      "enabled": true,
+      "max_age": 31536000,
+      "include_subdomains": true,
+      "preload": true
+    }
+  }
+}

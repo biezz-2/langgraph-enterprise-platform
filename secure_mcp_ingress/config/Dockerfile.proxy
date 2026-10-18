@@ -1,0 +1,27 @@
+# ==============================================================================
+# Dockerfile for Secure MCP Ingress Nginx Proxy (SA4)
+# ==============================================================================
+FROM nginx:alpine
+
+# Remove default boilerplate configuration
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+# Prepare directories
+RUN mkdir -p /etc/nginx/auth /var/log/nginx
+
+# Copy structured JSON logging and MCP SSE proxy configuration
+COPY config/nginx_json_logging.conf /etc/nginx/conf.d/00_nginx_json_logging.conf
+COPY config/nginx_mcp.conf /etc/nginx/conf.d/nginx_mcp.conf
+COPY auth/protected_resource_metadata.json /etc/nginx/auth/protected_resource_metadata.json
+
+# Validate Nginx configuration syntax during image build
+RUN nginx -t
+
+# Expose MCP Gateway port
+EXPOSE 8088
+
+# Built-in container healthcheck
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8088/health || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

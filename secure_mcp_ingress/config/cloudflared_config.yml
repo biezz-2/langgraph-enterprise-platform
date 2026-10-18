@@ -1,0 +1,57 @@
+# ==============================================================================
+# Cloudflare Tunnel Zero-Trust Configuration (SA1)
+# Target Service: Secure MCP Ingress Gateway
+# ==============================================================================
+
+# Tunnel UUID and Credentials path
+# Replace <TUNNEL_UUID> with the tunnel ID obtained from:
+#   cloudflared tunnel create secure-mcp-tunnel
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/00000000-0000-0000-0000-000000000000.json
+
+# Transport and connection tuning
+# Protocol QUIC (HTTP/3) provides high-performance UDP transport to Cloudflare Edge
+protocol: quic
+edge-ip-version: auto
+retries: 5
+
+# Logging configuration
+loglevel: info
+transport-loglevel: warn
+logfile: /var/log/cloudflared/cloudflared.log
+
+# Global origin request defaults
+originRequest:
+  connectTimeout: 30s
+  tlsTimeout: 10s
+  tcpKeepAlive: 30s
+  keepAliveTimeout: 90s
+  keepAliveConnections: 100
+  noTLSVerify: false
+  http2Origin: false
+
+# Ingress Rules (Evaluated top-to-bottom)
+ingress:
+  # Primary MCP Ingress Endpoint -> Reverse Proxy / Auth Gateway (Port 8088)
+  # Forwarded internally to MCP Server on Port 8787 after mTLS / Token verification
+  - hostname: mcp.domainanda.com
+    service: http://127.0.0.1:8088
+    originRequest:
+      connectTimeout: 30s
+      tlsTimeout: 10s
+      tcpKeepAlive: 30s
+      keepAliveTimeout: 90s
+      keepAliveConnections: 100
+      noTLSVerify: false
+      httpHostHeader: mcp.domainanda.com
+      originServerName: mcp.domainanda.com
+
+  # Direct MCP Server fallback route (commented out by default; used when proxy is bypassed)
+  # - hostname: mcp-direct.domainanda.com
+  #   service: http://127.0.0.1:8787
+  #   originRequest:
+  #     keepAliveTimeout: 90s
+  #     noTLSVerify: false
+
+  # Mandatory Catch-all Rule (rejects unmatched traffic with HTTP 404)
+  - service: http_status:404

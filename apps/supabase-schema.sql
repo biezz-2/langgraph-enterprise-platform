@@ -199,6 +199,23 @@ CREATE TABLE IF NOT EXISTS langgraph.matrix_config (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ingress Access Tokens (Secure MCP Ingress / RFC 9728)
+CREATE TABLE IF NOT EXISTS langgraph.ingress_tokens (
+    token_hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    aud TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    grace_until TIMESTAMPTZ,
+    rotated_to TEXT,
+    revoked_at TIMESTAMPTZ,
+    revocation_reason TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ============================================================================
 -- 3. Indexes for Query Performance
 -- ============================================================================
@@ -213,6 +230,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON langgraph.runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_thread ON langgraph.runs(thread_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON langgraph.audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_run ON langgraph.checkpoints(run_id);
+CREATE INDEX IF NOT EXISTS idx_ingress_tokens_client_id ON langgraph.ingress_tokens(client_id);
+CREATE INDEX IF NOT EXISTS idx_ingress_tokens_status ON langgraph.ingress_tokens(status);
 
 -- ============================================================================
 -- 4. Triggers for Automatic updated_at
@@ -246,6 +265,10 @@ DROP TRIGGER IF EXISTS update_kanban_cards_updated_at ON langgraph.kanban_cards;
 CREATE TRIGGER update_kanban_cards_updated_at BEFORE UPDATE ON langgraph.kanban_cards
     FOR EACH ROW EXECUTE FUNCTION langgraph.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_ingress_tokens_updated_at ON langgraph.ingress_tokens;
+CREATE TRIGGER update_ingress_tokens_updated_at BEFORE UPDATE ON langgraph.ingress_tokens
+    FOR EACH ROW EXECUTE FUNCTION langgraph.update_updated_at_column();
+
 -- ============================================================================
 -- 5. Row Level Security (RLS) Policies
 -- ============================================================================
@@ -264,6 +287,7 @@ ALTER TABLE langgraph.kanban_boards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE langgraph.kanban_columns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE langgraph.kanban_cards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE langgraph.matrix_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE langgraph.ingress_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Service role full access policies
 DO $$
@@ -273,7 +297,7 @@ DECLARE
         'subagent_registry', 'threads', 'runs', 'checkpoints', 'telemetry_events',
         'correlation_edges', 'temporal_facts', 'audit_log', 'hitl_inbox',
         'correlation_settings', 'kanban_boards', 'kanban_columns', 'kanban_cards',
-        'matrix_config'
+        'matrix_config', 'ingress_tokens'
     ];
 BEGIN
     FOREACH tbl IN ARRAY tables LOOP

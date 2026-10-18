@@ -1,0 +1,22 @@
+# ==============================================================================
+# Docker Compose for Secure MCP Ingress Nginx Proxy (SA4)
+# ==============================================================================
+services:
+  secure-mcp-proxy:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.proxy
+    image: secure-mcp-nginx-proxy:latest
+    container_name: secure-mcp-nginx-proxy
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ../config/nginx_json_logging.conf:/etc/nginx/conf.d/00_nginx_json_logging.conf:ro
+      - ../config/nginx_mcp.conf:/etc/nginx/conf.d/nginx_mcp.conf:ro
+      - ../auth/protected_resource_metadata.json:/etc/nginx/auth/protected_resource_metadata.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

@@ -1,0 +1,27 @@
+{
+  "resource": "https://mcp.domainanda.com/mcp",
+  "authorization_servers": [
+    "https://auth.domainanda.com"
+  ],
+  "scopes_supported": [
+    "memory:read",
+    "memory:write",
+    "tools:execute"
+  ],
+  "bearer_methods_supported": [
+    "header"
+  ],
+  "resource_name": "Secure MCP Ingress Protected Resource",
+  "resource_documentation": "https://mcp.domainanda.com/docs",
+  "challenge_spec": {
+    "scheme": "Bearer",
+    "realm": "https://mcp.domainanda.com/mcp",
+    "resource_metadata": "https://mcp.domainanda.com/.well-known/oauth-protected-resource",
+    "error_codes": {
+      "invalid_request": "The request is missing a required parameter or is malformed.",
+      "invalid_token": "The access token provided is expired, revoked, malformed, or invalid.",
+      "insufficient_scope": "The request requires higher privileges than provided by the access token."
+    },
+    "template": "Bearer realm=\"{realm}\", error=\"{error}\", error_description=\"{error_description}\", scope=\"{scope}\", resource_metadata=\"{resource_metadata}\""
+  }
+}

@@ -29,7 +29,9 @@ import {
   Radio,
   Eye,
   RefreshCw,
+  Compass,
 } from "lucide-react"
+import EmbeddingAtlas from "./EmbeddingAtlas"
 import { NeuronGraphData, NeuronNode, NeuronLink, ObsidianPhysicsConfig } from "@/types/neuron"
 import { MOCK_GRAPHITI_DATA, processNeuronGraphData } from "@/lib/mockNeuronData"
 import type { ForceGraphMethods as ForceGraph2DMethods } from "react-force-graph-2d"
@@ -70,7 +72,7 @@ export default function NeuronGraph() {
   const fg2dRef = useRef<ForceGraph2DMethods | undefined>(undefined)
   const fg3dRef = useRef<ForceGraph3DMethods | undefined>(undefined)
 
-  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d")
+  const [viewMode, setViewMode] = useState<"2d" | "3d" | "atlas">("2d")
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
   const [rawData, setRawData] = useState<NeuronGraphData>({ nodes: [], links: [] })
   const [selectedNode, setSelectedNode] = useState<NeuronNode | null>(null)
@@ -661,7 +663,10 @@ export default function NeuronGraph() {
               <span>2D Obsidian</span>
             </button>
             <button
-              onClick={() => setViewMode("3d")}
+              onClick={() => {
+                setViewMode("3d")
+                setIsRotating(false)
+              }}
               className={`px-2.5 py-1 text-xs font-mono font-semibold rounded-md transition flex items-center gap-1.5 ${
                 viewMode === "3d"
                   ? "bg-indigo-600 text-white shadow"
@@ -671,6 +676,21 @@ export default function NeuronGraph() {
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span>3D Neural</span>
+            </button>
+            <button
+              onClick={() => {
+                setViewMode("atlas")
+                setIsRotating(false)
+              }}
+              className={`px-2.5 py-1 text-xs font-mono font-semibold rounded-md transition flex items-center gap-1.5 ${
+                viewMode === "atlas"
+                  ? "bg-indigo-600 text-white shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="2D UMAP Semantic Embedding Atlas Projection"
+            >
+              <Compass className="w-3.5 h-3.5 text-cyan-300" />
+              <span>Atlas UMAP</span>
             </button>
           </div>
 
@@ -919,7 +939,12 @@ export default function NeuronGraph() {
       <div className="flex-1 w-full h-full relative">
         {dimensions.width > 0 && dimensions.height > 0 && (
           <>
-            {viewMode === "2d" ? (
+            {viewMode === "atlas" ? (
+              <EmbeddingAtlas
+                width={dimensions.width}
+                height={dimensions.height}
+              />
+            ) : viewMode === "2d" ? (
               <ForceGraph2D
                 ref={fg2dRef}
                 width={dimensions.width}
@@ -1001,7 +1026,8 @@ export default function NeuronGraph() {
       </div>
 
       {/* BI-TEMPORAL TIMELINE SLIDER (Bottom) */}
-      <div className="absolute bottom-12 left-3 right-3 z-20 bg-zinc-900/90 border border-zinc-800/80 rounded-xl p-2.5 backdrop-blur-md shadow-2xl">
+      {viewMode !== "atlas" && (
+        <div className="absolute bottom-12 left-3 right-3 z-20 bg-zinc-900/90 border border-zinc-800/80 rounded-xl p-2.5 backdrop-blur-md shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-zinc-400 mb-1.5">
           <div className="flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-indigo-400" />
@@ -1070,6 +1096,7 @@ export default function NeuronGraph() {
           />
         </div>
       </div>
+      )}
 
       {/* BOTTOM LEGEND & METRICS BAR */}
       <div className="absolute bottom-2 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-zinc-950/80 border border-zinc-900 backdrop-blur-md text-[10px] font-mono text-zinc-400">
