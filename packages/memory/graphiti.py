@@ -442,10 +442,176 @@ class GraphitiMemoryEngine:
                             "color": edge_color,
                             "animated": True
                         })
+
+            # 4. Ambil Semua Execution Runs dari DB Relasional (Histori Episode Lengkap)
+            db_runs_count = 0
+            async with db.execute(
+                "SELECT run_id, thread_id, status, objective, current_subagent, created_at "
+                "FROM runs ORDER BY created_at DESC"
+            ) as cursor:
+                runs_rows = await cursor.fetchall()
+                for r in runs_rows:
+                    run_dict = dict(r)
+                    run_id = run_dict["run_id"]
+                    node_id = f"episode-{run_id}"
+                    if node_id in node_map:
+                        continue
+                    status = run_dict.get("status") or "completed"
+                    subagent = (run_dict.get("current_subagent") or "atlas").lower()
+                    obj = run_dict.get("objective") or f"Run {run_id[:8]}"
+                    created_at = run_dict.get("created_at")
+                    created_at_str = created_at.isoformat() if created_at is not None and hasattr(created_at, "isoformat") else (str(created_at) if created_at is not None else "")
+                    color = "#38bdf8" if status == "completed" else ("#ef4444" if status == "failed" else "#fbbf24")
+
+                    nodes.append({
+                        "id": node_id,
+                        "label": f"Run: {obj[:22]}",
+                        "type": "episode",
+                        "category": "episodic",
+                        "charge": 0.75,
+                        "status": status,
+                        "size": 13,
+                        "color": color,
+                        "valid_at": created_at_str,
+                        "invalid_at": None,
+                        "episode_run_id": run_id,
+                        "description": f"Objective: {obj} | Status: {status} | Subagent: {subagent}",
+                        "attributes": {
+                            "uuid": run_id,
+                            "run_id": run_id,
+                            "thread_id": run_dict.get("thread_id"),
+                            "objective": obj,
+                            "subagent": subagent,
+                            "status": status,
+                            "created_at": created_at_str
+                        }
+                    })
+                    node_map.add(node_id)
+                    db_runs_count += 1
+
+                    if "cat-episodic" in node_map:
+                        edges.append({
+                            "id": f"link-{node_id}-cat-episodic",
+                            "source": node_id,
+                            "target": "cat-episodic",
+                            "relation": "IS_EPISODE",
+                            "weight": 0.7,
+                            "color": "#0284c7"
+                        })
+
+                    sa_node = f"agent-{subagent}"
+                    if sa_node in node_map:
+                        edges.append({
+                            "id": f"link-{sa_node}-{node_id}",
+                            "source": sa_node,
+                            "target": node_id,
+                            "relation": "EXECUTED",
+                            "weight": 1.0,
+                            "color": "#38bdf8"
+                        })
+
+            # 5. Ambil Semua Temporal Facts dari DB Relasional (Bi-temporal Semantic Neurons)
+            db_facts_count = 0
+            async with db.execute(
+                "SELECT fact_id, subject, predicate, object, valid_at, invalid_at, created_at, episode_run_id, pii_redacted "
+                "FROM temporal_facts ORDER BY created_at DESC"
+            ) as cursor:
+                facts_rows = await cursor.fetchall()
+                for f_row in facts_rows:
+                    fact = dict(f_row)
+                    fact_id = fact["fact_id"]
+                    node_id = f"entity-{fact_id}"
+                    if node_id in node_map:
+                        continue
+                    is_invalid = fact.get("invalid_at") is not None
+                    subj = str(fact.get("subject") or "Fact")
+                    pred = str(fact.get("predicate") or "PROP")
+                    obj = str(fact.get("object") or "")
+                    valid_at = fact.get("valid_at")
+                    valid_at_str = valid_at.isoformat() if valid_at is not None and hasattr(valid_at, "isoformat") else (str(valid_at) if valid_at is not None else "")
+                    invalid_at = fact.get("invalid_at")
+                    invalid_at_str = invalid_at.isoformat() if invalid_at is not None and hasattr(invalid_at, "isoformat") else (str(invalid_at) if invalid_at is not None else None)
+
+                    subj_low = subj.lower()
+                    cat_key = "semantic"
+                    if any(k in subj_low for k in ["guard", "policy", "rule", "auth", "security", "pdp", "compliance"]):
+                        cat_key = "meta"
+                    elif any(k in subj_low for k in ["flow", "proc", "pipeline", "method", "action"]):
+                        cat_key = "procedural"
+                    elif fact.get("episode_run_id"):
+                        cat_key = "episodic"
+
+                    nodes.append({
+                        "id": node_id,
+                        "label": f"{subj[:18]}: {pred[:12]}",
+                        "type": "fact_entity",
+                        "category": cat_key,
+                        "charge": 0.5 if is_invalid else 0.85,
+                        "status": "invalid" if is_invalid else "active",
+                        "size": 11 if is_invalid else 14,
+                        "color": "#f43f5e" if is_invalid else "#10b981",
+                        "subject": subj,
+                        "predicate": pred,
+                        "object": obj,
+                        "valid_at": valid_at_str,
+                        "invalid_at": invalid_at_str,
+                        "episode_run_id": fact.get("episode_run_id"),
+                        "description": f"{subj} -> {pred} -> {obj[:120]}",
+                        "attributes": {
+                            "uuid": fact_id,
+                            "subject": subj,
+                            "predicate": pred,
+                            "object": obj,
+                            "pii_redacted": bool(fact.get("pii_redacted")),
+                            "episode_run_id": fact.get("episode_run_id")
+                        }
+                    })
+                    node_map.add(node_id)
+                    db_facts_count += 1
+
+                    cat_target = f"cat-{cat_key}"
+                    if cat_target in node_map:
+                        edges.append({
+                            "id": f"link-{node_id}-{cat_target}",
+                            "source": node_id,
+                            "target": cat_target,
+                            "relation": "HAS_FACT",
+                            "weight": 0.6,
+                            "color": "#334155"
+                        })
+
+                    ep_id = fact.get("episode_run_id")
+                    if ep_id:
+                        run_target = f"episode-{ep_id}"
+                        if run_target in node_map:
+                            edges.append({
+                                "id": f"link-{run_target}-{node_id}",
+                                "source": run_target,
+                                "target": node_id,
+                                "relation": "GENERATED_FACT",
+                                "weight": 0.8,
+                                "color": "#10b981",
+                                "bitemporal": True,
+                                "valid_at": valid_at_str,
+                                "invalid_at": invalid_at_str
+                            })
+
+                    for sa_name in ["atlas", "clio", "vulcan", "athena", "hermes", "mnemosyne", "janus", "themis", "metron", "iris"]:
+                        if sa_name in subj_low or sa_name in obj.lower():
+                            sa_node = f"agent-{sa_name}"
+                            if sa_node in node_map:
+                                edges.append({
+                                    "id": f"link-{sa_node}-{node_id}",
+                                    "source": sa_node,
+                                    "target": node_id,
+                                    "relation": "RELATES_TO",
+                                    "weight": 0.7,
+                                    "color": "#6366f1"
+                                })
         finally:
             await db.close()
 
-        # 4. Query FalkorDB Cypher untuk Node Entitas & Episode
+        # 6. Query FalkorDB Cypher untuk Node Entitas & Episode Tambahan
         nodes_res = await driver.execute_query("MATCH (n) RETURN labels(n) AS labels, properties(n) AS props")
         falkor_nodes_raw = nodes_res[0] if nodes_res else []
 
@@ -464,6 +630,8 @@ class GraphitiMemoryEngine:
 
             if is_episodic:
                 node_id = f"episode-{uuid}"
+                if node_id in node_map:
+                    continue
                 ntype = "episode"
                 ncat = "episodic"
                 color = "#3b82f6"
@@ -471,7 +639,9 @@ class GraphitiMemoryEngine:
                 falkor_episode_count += 1
             else:
                 node_id = f"entity-{uuid}"
-                ntype = "entity"
+                if node_id in node_map:
+                    continue
+                ntype = "fact_entity"
                 ncat = "semantic"
                 color = "#a855f7"
                 size = 15
@@ -566,7 +736,7 @@ class GraphitiMemoryEngine:
                 })
 
         return {
-            "engine": "Graphiti v0.4 (FalkorDB Temporal Graph)",
+            "engine": "Graphiti v0.4 (Hybrid FalkorDB + PostgreSQL Temporal Graph)",
             "style": "MiroFish Spiking Neuron Architecture",
             "timestamp": time.time(),
             "nodes": nodes,
@@ -577,6 +747,8 @@ class GraphitiMemoryEngine:
                 "falkordb_entities": falkor_entity_count,
                 "falkordb_episodes": falkor_episode_count,
                 "falkordb_edges": len(falkor_edges_raw),
+                "db_runs": db_runs_count,
+                "db_facts": db_facts_count,
                 "subagents": 10,
                 "categories": len(MemoryTaxonomy.CATEGORIES)
             }
@@ -640,36 +812,110 @@ class GraphitiMemoryEngine:
                         "color": "#334155"
                     })
 
+            # Execution Runs dari DB Relasional
+            async with db.execute(
+                "SELECT run_id, thread_id, status, objective, current_subagent, created_at "
+                "FROM runs ORDER BY created_at DESC"
+            ) as cursor:
+                runs_rows = await cursor.fetchall()
+                for r in runs_rows:
+                    run_dict = dict(r)
+                    run_id = run_dict["run_id"]
+                    node_id = f"episode-{run_id}"
+                    if node_id in node_map:
+                        continue
+                    status = run_dict.get("status") or "completed"
+                    subagent = (run_dict.get("current_subagent") or "atlas").lower()
+                    obj = run_dict.get("objective") or f"Run {run_id[:8]}"
+                    created_at = run_dict.get("created_at")
+                    created_at_str = created_at.isoformat() if created_at is not None and hasattr(created_at, "isoformat") else (str(created_at) if created_at is not None else "")
+                    color = "#38bdf8" if status == "completed" else ("#ef4444" if status == "failed" else "#fbbf24")
+
+                    nodes.append({
+                        "id": node_id,
+                        "label": f"Run: {obj[:22]}",
+                        "type": "episode",
+                        "category": "episodic",
+                        "charge": 0.75,
+                        "status": status,
+                        "size": 13,
+                        "color": color,
+                        "valid_at": created_at_str,
+                        "invalid_at": None,
+                        "episode_run_id": run_id,
+                        "description": f"Objective: {obj} | Status: {status} | Subagent: {subagent}"
+                    })
+                    node_map.add(node_id)
+
+                    if "cat-episodic" in node_map:
+                        edges.append({
+                            "id": f"link-{node_id}-cat-episodic",
+                            "source": node_id,
+                            "target": "cat-episodic",
+                            "relation": "IS_EPISODE",
+                            "weight": 0.7,
+                            "color": "#0284c7"
+                        })
+
+                    sa_node = f"agent-{subagent}"
+                    if sa_node in node_map:
+                        edges.append({
+                            "id": f"link-{sa_node}-{node_id}",
+                            "source": sa_node,
+                            "target": node_id,
+                            "relation": "EXECUTED",
+                            "weight": 1.0,
+                            "color": "#38bdf8"
+                        })
+
             # Temporal Facts dari DB
             async with db.execute("SELECT * FROM temporal_facts ORDER BY created_at DESC") as cursor:
                 facts = await cursor.fetchall()
                 for f_row in facts:
                     fact = dict(f_row)
-                    node_id = f"fact-{fact['fact_id']}"
+                    node_id = f"entity-{fact['fact_id']}"
+                    if node_id in node_map:
+                        continue
                     is_invalid = fact.get("invalid_at") is not None or fact.get("status") == "invalid"
-                    group = fact.get("group_id", "semantic")
+                    subj = str(fact.get("subject") or "Fact")
+                    pred = str(fact.get("predicate") or "PROP")
+                    obj = str(fact.get("object") or "")
+                    valid_at = fact.get("valid_at")
+                    valid_at_str = valid_at.isoformat() if valid_at is not None and hasattr(valid_at, "isoformat") else (str(valid_at) if valid_at is not None else "")
+                    invalid_at = fact.get("invalid_at")
+                    invalid_at_str = invalid_at.isoformat() if invalid_at is not None and hasattr(invalid_at, "isoformat") else (str(invalid_at) if invalid_at is not None else None)
+
+                    subj_low = subj.lower()
+                    cat_key = "semantic"
+                    if any(k in subj_low for k in ["guard", "policy", "rule", "auth", "security", "pdp", "compliance"]):
+                        cat_key = "meta"
+                    elif any(k in subj_low for k in ["flow", "proc", "pipeline", "method", "action"]):
+                        cat_key = "procedural"
+                    elif fact.get("episode_run_id"):
+                        cat_key = "episodic"
 
                     nodes.append({
                         "id": node_id,
-                        "label": f"{fact.get('subject', 'Fact')}:{fact.get('predicate', 'PROP')}",
-                        "type": "entity",
-                        "category": group.lower() if group.lower() in MemoryTaxonomy.CATEGORIES else "semantic",
+                        "label": f"{subj[:18]}: {pred[:12]}",
+                        "type": "fact_entity",
+                        "category": cat_key,
                         "charge": 0.5 if is_invalid else 0.85,
                         "status": "invalid" if is_invalid else "active",
-                        "size": 12 if is_invalid else 15,
+                        "size": 11 if is_invalid else 14,
                         "color": "#f43f5e" if is_invalid else "#10b981",
-                        "valid_at": fact.get("valid_at"),
-                        "invalid_at": fact.get("invalid_at"),
+                        "valid_at": valid_at_str,
+                        "invalid_at": invalid_at_str,
+                        "episode_run_id": fact.get("episode_run_id"),
+                        "description": f"{subj} -> {pred} -> {obj[:120]}",
                         "attributes": {
-                            "subject": fact.get("subject"),
-                            "predicate": fact.get("predicate"),
-                            "object": fact.get("object"),
-                            "group_id": group
+                            "subject": subj,
+                            "predicate": pred,
+                            "object": obj,
+                            "episode_run_id": fact.get("episode_run_id")
                         }
                     })
                     node_map.add(node_id)
 
-                    cat_key = group.lower()
                     cat_node_id = f"cat-{cat_key}"
                     if cat_node_id in node_map:
                         edges.append({
@@ -677,9 +923,25 @@ class GraphitiMemoryEngine:
                             "source": node_id,
                             "target": cat_node_id,
                             "relation": "HAS_FACT",
-                            "weight": 1.0,
+                            "weight": 0.6,
                             "color": "#475569"
                         })
+
+                    ep_id = fact.get("episode_run_id")
+                    if ep_id:
+                        run_target = f"episode-{ep_id}"
+                        if run_target in node_map:
+                            edges.append({
+                                "id": f"link-{run_target}-{node_id}",
+                                "source": run_target,
+                                "target": node_id,
+                                "relation": "GENERATED_FACT",
+                                "weight": 0.8,
+                                "color": "#10b981",
+                                "bitemporal": True,
+                                "valid_at": valid_at_str,
+                                "invalid_at": invalid_at_str
+                            })
 
             # Correlation Edges
             async with db.execute(
@@ -716,6 +978,74 @@ class GraphitiMemoryEngine:
                     "subagents": 10,
                     "categories": len(MemoryTaxonomy.CATEGORIES)
                 }
+            }
+        finally:
+            await db.close()
+
+    @classmethod
+    async def rehydrate_falkordb_from_db(cls, driver=None) -> Dict[str, Any]:
+        """Menyinkronkan seluruh runs dan temporal_facts dari PostgreSQL Supabase ke graf FalkorDB."""
+        if driver is None:
+            driver = await cls.get_driver()
+        if not driver:
+            return {"status": "skipped", "reason": "FalkorDB driver offline"}
+
+        db = await get_db_connection()
+        runs_synced = 0
+        facts_synced = 0
+        links_synced = 0
+
+        try:
+            # 1. Sync Runs sebagai Episodic:Episode
+            async with db.execute("SELECT run_id, objective, current_subagent, status, created_at FROM runs") as cursor:
+                runs = await cursor.fetchall()
+            for r in runs:
+                rid = r["run_id"]
+                obj = (r["objective"] or f"Run {rid[:8]}").replace("'", "\\'")
+                subagent = (r["current_subagent"] or "atlas").lower()
+                status = r["status"] or "completed"
+                created_at = str(r["created_at"]) if r["created_at"] else ""
+                q = (
+                    f"MERGE (ep:Episodic:Episode {{uuid: '{rid}'}}) "
+                    f"SET ep.name = '{obj}', ep.subagent = '{subagent}', ep.status = '{status}', "
+                    f"ep.valid_at = '{created_at}', ep.created_at = '{created_at}'"
+                )
+                await driver.execute_query(q)
+                runs_synced += 1
+
+            # 2. Sync Facts sebagai Entity
+            async with db.execute("SELECT fact_id, subject, predicate, object, valid_at, invalid_at, created_at, episode_run_id FROM temporal_facts") as cursor:
+                facts = await cursor.fetchall()
+            for f in facts:
+                fid = f["fact_id"]
+                subj = str(f["subject"] or "Fact").replace("'", "\\'")
+                pred = str(f["predicate"] or "PROP").replace("'", "\\'")
+                obj = str(f["object"] or "").replace("'", "\\'")
+                valid_at = str(f["valid_at"]) if f["valid_at"] else ""
+                invalid_at = str(f["invalid_at"]) if f["invalid_at"] else ""
+                status = "invalid" if f["invalid_at"] else "active"
+                q = (
+                    f"MERGE (ent:Entity {{uuid: '{fid}'}}) "
+                    f"SET ent.name = '{subj}', ent.subject = '{subj}', ent.predicate = '{pred}', "
+                    f"ent.object = '{obj}', ent.valid_at = '{valid_at}', ent.invalid_at = '{invalid_at}', ent.status = '{status}'"
+                )
+                await driver.execute_query(q)
+                facts_synced += 1
+
+                ep_id = f.get("episode_run_id")
+                if ep_id:
+                    link_q = (
+                        f"MATCH (ep:Episode {{uuid: '{ep_id}'}}), (ent:Entity {{uuid: '{fid}'}}) "
+                        f"MERGE (ep)-[r:CONTAINS]->(ent) SET r.valid_at = '{valid_at}'"
+                    )
+                    await driver.execute_query(link_q)
+                    links_synced += 1
+
+            return {
+                "status": "success",
+                "runs_synced": runs_synced,
+                "facts_synced": facts_synced,
+                "links_synced": links_synced
             }
         finally:
             await db.close()

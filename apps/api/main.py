@@ -297,6 +297,10 @@ async def seed_memory_knowledge():
 async def get_graphiti_neuron_graph():
     return await GraphitiMemoryEngine.build_neuron_graph()
 
+@app.post("/api/graph/rehydrate")
+async def rehydrate_graphiti_graph():
+    return await GraphitiMemoryEngine.rehydrate_falkordb_from_db()
+
 class AddEpisodeApiRequest(BaseModel):
     name: str
     episode_body: str

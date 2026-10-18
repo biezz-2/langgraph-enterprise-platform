@@ -82,7 +82,7 @@ export default function NeuronGraph() {
   const [isLiveApi, setIsLiveApi] = useState(false)
   const [isRotating, setIsRotating] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedFilter, setSelectedFilter] = useState<"all" | "subagent" | "category" | "fact_entity" | "invalid">("all")
+  const [selectedFilter, setSelectedFilter] = useState<"all" | "subagent" | "category" | "fact_entity" | "episode" | "invalid">("all")
 
   // Physics settings popover
   const [physics, setPhysics] = useState<ObsidianPhysicsConfig>(DEFAULT_PHYSICS)
@@ -230,11 +230,11 @@ export default function NeuronGraph() {
       .map((node) => {
         const n = { ...node }
         // Bi-temporal evaluation
-        if (n.type === "fact_entity" || n.type === "fact") {
+        if (n.type === "fact_entity" || n.type === "fact" || n.type === "entity") {
           const vTime = n.valid_at ? new Date(n.valid_at).getTime() : 0
           const ivTime = n.invalid_at ? new Date(n.invalid_at).getTime() : Infinity
 
-          if (timelineTime > 0 && vTime > timelineTime) {
+          if (timelineTime > 0 && vTime > 0 && vTime > timelineTime) {
             // Fact not yet born at timeline position
             return null
           }
@@ -244,6 +244,11 @@ export default function NeuronGraph() {
           } else {
             n.status = "active"
             n.color = "#10b981" // Emerald 500
+          }
+        } else if (n.type === "episode" || n.type === "run") {
+          const vTime = n.valid_at ? new Date(n.valid_at).getTime() : 0
+          if (timelineTime > 0 && vTime > 0 && vTime > timelineTime) {
+            return null
           }
         }
         return n
@@ -257,7 +262,11 @@ export default function NeuronGraph() {
     } else if (selectedFilter === "category") {
       visibleNodes = visibleNodes.filter((n) => n.type === "category" || n.type === "hub")
     } else if (selectedFilter === "fact_entity") {
-      visibleNodes = visibleNodes.filter((n) => n.type === "fact_entity" && n.status !== "invalid")
+      visibleNodes = visibleNodes.filter(
+        (n) => (n.type === "fact_entity" || n.type === "entity" || n.type === "fact") && n.status !== "invalid"
+      )
+    } else if (selectedFilter === "episode") {
+      visibleNodes = visibleNodes.filter((n) => n.type === "episode" || n.type === "run")
     } else if (selectedFilter === "invalid") {
       visibleNodes = visibleNodes.filter((n) => n.status === "invalid")
     }
@@ -714,6 +723,7 @@ export default function NeuronGraph() {
                 { id: "subagent", label: "Agents", dot: "#818cf8" },
                 { id: "category", label: "Hubs", dot: "#38bdf8" },
                 { id: "fact_entity", label: "Facts", dot: "#10b981" },
+                { id: "episode", label: "Runs", dot: "#38bdf8" },
                 { id: "invalid", label: "Invalidated", dot: "#f43f5e" },
               ] as const
             ).map((filter) => (
