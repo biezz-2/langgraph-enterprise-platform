@@ -1,0 +1,28 @@
+{
+  "board_id": "phase-board-lgp-enterprise-hardening-p07",
+  "type": "PHASE",
+  "parent": "lgp-enterprise-hardening",
+  "phase_ref": "p07",
+  "owner_agent": "HERMES",
+  "status": "ACTIVE",
+  "title": "Network hardening + PM2 deploy without secrets",
+  "cards": [
+    {
+      "card_id": "c-phase-board-lgp-enterprise-hardening-p07-01",
+      "title": "Network hardening + PM2 deploy without secrets",
+      "status": "BACKLOG",
+      "severity": null,
+      "finding_ref": null,
+      "assignee": "HERMES",
+      "notes": "Risk driving this phase: HIGH: 0.0.0.0 bind, public IP reachable"
+    }
+  ],
+  "coordination": [
+    {
+      "edge": "VALIDATES",
+      "board_id": "validation-board-lgp-enterprise-hardening-p07"
+    }
+  ],
+  "created_at": "2026-10-21T06:03:31.099352+00:00",
+  "updated_at": "2026-10-21T06:03:31.099352+00:00"
+}

@@ -1,0 +1,95 @@
+{
+  "project_id": "lgp-enterprise-hardening",
+  "updated_at": "2026-10-21T06:03:31.099352+00:00",
+  "boards": [
+    {
+      "board_id": "board-lgp-enterprise-hardening",
+      "type": "PROJECT",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "LGP MCP + API enterprise hardening",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/board-lgp-enterprise-hardening.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p01",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "Secret hygiene + credential rotation",
+      "phase_ref": "p01",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p01.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p02",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "MCP auth + transport security",
+      "phase_ref": "p02",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p02.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p03",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "API auth (routes + WebSocket)",
+      "phase_ref": "p03",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p03.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p04",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "SSRF hardening of lgp_api_request",
+      "phase_ref": "p04",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p04.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p05",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "Rate limit + audit + security headers",
+      "phase_ref": "p05",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p05.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p06",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "Dependency upgrade to current releases",
+      "phase_ref": "p06",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p06.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p07",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "Network hardening + PM2 deploy without secrets",
+      "phase_ref": "p07",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p07.json"
+    },
+    {
+      "board_id": "phase-board-lgp-enterprise-hardening-p08",
+      "type": "PHASE",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "Regression suite + independent validation gate",
+      "phase_ref": "p08",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/phase-board-lgp-enterprise-hardening-p08.json"
+    },
+    {
+      "board_id": "audit-board-lgp-enterprise-hardening",
+      "type": "AUDIT",
+      "status": "ACTIVE",
+      "owner_agent": "HERMES",
+      "scope": "cron audit findings for lgp-enterprise-hardening",
+      "path": "/home/biezz/Documents/Project/coding/langgraph/.state/board/audit-board-lgp-enterprise-hardening.json"
+    }
+  ],
+  "crons": []
+}

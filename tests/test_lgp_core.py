@@ -136,6 +136,9 @@ async def test_atlas_run_execution():
         objective="Uji coba integrasi riset dan koding",
         requested_subagents=["clio", "vulcan", "athena"]
     )
+    # Fase 3: vulcan wajib persetujuan manusia (native interrupt)
+    assert result["status"] == "interrupted"
+    result = await orchestrator.resume_run("test-th-1", {"decision": "approved", "approver": "human"})
     assert result["status"] == "completed"
     assert result["run_id"].startswith("run-")
     assert len(result["delegates_report"]) >= 2

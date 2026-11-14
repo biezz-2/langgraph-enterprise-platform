@@ -288,7 +288,8 @@ class ParallelEmbeddingFabric:
         else:
             self.base_url = f"{raw_url.rstrip('/')}/embeddings"
 
-        self.api_key = api_key or os.environ.get("ROUTER_API_KEY", os.environ.get("NINE_ROUTER_API_KEY", "***REMOVED-SECRET***"))
+        # No default: credential must come from env (ROUTER_API_KEY / NINE_ROUTER_API_KEY).
+        self.api_key = api_key or os.environ.get("ROUTER_API_KEY") or os.environ.get("NINE_ROUTER_API_KEY")
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
         self.budget_manager = budget_manager or InheritedBudgetManager()
         self.timeout = timeout
@@ -357,6 +358,11 @@ class ParallelEmbeddingFabric:
         spec = self.registry.get(model_id)
         if not spec:
             raise ValueError(f"Unknown model_id: {model_id}")
+
+        if not self.api_key:
+            raise RuntimeError(
+                "Embedding credential missing: set ROUTER_API_KEY (or NINE_ROUTER_API_KEY)."
+            )
 
         if self.circuit_breaker.is_open(model_id):
             raise RuntimeError(f"Circuit breaker is OPEN for model: {model_id}")

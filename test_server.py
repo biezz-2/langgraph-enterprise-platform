@@ -1,0 +1,6 @@
+import asyncio
+import uvicorn
+from apps.api.main import app
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8003, log_level="debug")

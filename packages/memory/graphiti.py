@@ -3,8 +3,9 @@ import time
 import socket
 import logging
 import asyncio
+import json
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Set
 from pydantic import BaseModel, Field
 
 # Matikan telemetry/PostHog agar latency minimal dan tidak blocking
@@ -71,6 +72,713 @@ class MemoryTaxonomy:
         "working": "#8b5cf6",     # Violet
         "meta": "#64748b"         # Slate
     }
+
+
+# ============================================================================
+# RDF/OWL Standard Edge Types (per W3C recommendations)
+# ============================================================================
+class RDFEdgeTypes:
+    """Tipe edge standar RDF/OWL untuk knowledge graph interoperability."""
+    RDF_TYPE = "rdf:type"
+    RDFS_SUBCLASS_OF = "rdfs:subClassOf"
+    RDFS_LABEL = "rdfs:label"
+    RDFS_COMMENT = "rdfs:comment"
+    OWL_OBJECT_PROPERTY = "owl:ObjectProperty"
+    OWL_DATATYPE_PROPERTY = "owl:DatatypeProperty"
+    OWL_EQUIVALENT_CLASS = "owl:equivalentClass"
+    OWL_EQUIVALENT_PROPERTY = "owl:equivalentProperty"
+    OWL_DISJOINT_WITH = "owl:disjointWith"
+    OWL_INVERSE_OF = "owl:inverseOf"
+    OWL_SAME_AS = "owl:sameAs"
+    PROV_WAS_GENERATED_BY = "prov:wasGeneratedBy"
+    PROV_WAS_DERIVED_FROM = "prov:wasDerivedFrom"
+    PROV_WAS_ATTRIBUTED_TO = "prov:wasAttributedTo"
+    DCTERMS_IS_PART_OF = "dcterms:isPartOf"
+    DCTERMS_HAS_PART = "dcterms:hasPart"
+    DCTERMS_CREATOR = "dcterms:creator"
+    DCTERMS_CREATED = "dcterms:created"
+    DCTERMS_MODIFIED = "dcterms:modified"
+    SKOS_BROADER = "skos:broader"
+    SKOS_NARROWER = "skos:narrower"
+    SKOS_RELATED = "skos:related"
+    SKOS_PREFLABEL = "skos:prefLabel"
+    SKOS_ALTLABEL = "skos:altLabel"
+
+    # Custom domain-specific (prefixed to avoid collision)
+    LGP_HAS_CAPABILITY = "lgp:hasCapability"
+    LGP_EXECUTED = "lgp:executed"
+    LGP_GENERATED_FACT = "lgp:generatedFact"
+    LGP_HAS_FACT = "lgp:hasFact"
+    LGP_RELATES_TO = "lgp:relatesTo"
+    LGP_REPRESENTATION = "lgp:representation"
+    LGP_PART_OF = "lgp:partOf"
+    LGP_NPMI_CORRELATION = "lgp:npmicorrelation"
+    LGP_IS_EPISODE = "lgp:isEpisode"
+
+    @classmethod
+    def all(cls) -> List[str]:
+        return [v for k, v in cls.__dict__.items() if not k.startswith("_") and isinstance(v, str)]
+
+
+# ============================================================================
+# WebVOWL / Chowlk Visual Notation Shape Mapping
+# ============================================================================
+class VisualNotation:
+    """Mapping tipe node/edge ke visual notation standar WebVOWL/Chowlk."""
+    
+    # Node shapes per WebVOWL 2.0 specification
+    NODE_SHAPES = {
+        # OWL Classes → ellipse (circle)
+        "category": "ellipse",
+        "subagent": "ellipse", 
+        "entity": "ellipse",
+        # Instances → rectangle
+        "episode": "rectangle",
+        "instance": "rectangle",
+        # Fact entities (data-like) → rounded rectangle (WebVOWL datatype/literal style)
+        "fact_entity": "roundrectangle",
+        # Datatypes → rounded rectangle
+        "datatype": "roundrectangle",
+        "literal": "roundrectangle",
+    }
+    
+    # Edge types per WebVOWL
+    EDGE_TYPES = {
+        RDFEdgeTypes.RDFS_SUBCLASS_OF: {"style": "solid", "arrow": "triangle", "label": "subClassOf"},
+        RDFEdgeTypes.OWL_OBJECT_PROPERTY: {"style": "solid", "arrow": "triangle", "label": ""},
+        RDFEdgeTypes.OWL_DATATYPE_PROPERTY: {"style": "dashed", "arrow": "triangle", "label": ""},
+        RDFEdgeTypes.OWL_EQUIVALENT_CLASS: {"style": "dotted", "arrow": "triangle", "label": "≡"},
+        RDFEdgeTypes.OWL_SAME_AS: {"style": "dotted", "arrow": "diamond", "label": "sameAs"},
+        RDFEdgeTypes.PROV_WAS_GENERATED_BY: {"style": "solid", "arrow": "vee", "label": "generatedBy"},
+        RDFEdgeTypes.DCTERMS_IS_PART_OF: {"style": "solid", "arrow": "triangle", "label": "partOf"},
+        RDFEdgeTypes.SKOS_BROADER: {"style": "solid", "arrow": "triangle", "label": "broader"},
+        RDFEdgeTypes.SKOS_NARROWER: {"style": "solid", "arrow": "triangle", "label": "narrower"},
+        RDFEdgeTypes.SKOS_RELATED: {"style": "dashed", "arrow": "none", "label": "related"},
+        # LGP custom
+        RDFEdgeTypes.LGP_HAS_CAPABILITY: {"style": "solid", "arrow": "triangle", "label": "hasCapability"},
+        RDFEdgeTypes.LGP_EXECUTED: {"style": "solid", "arrow": "vee", "label": "executed"},
+        RDFEdgeTypes.LGP_GENERATED_FACT: {"style": "solid", "arrow": "vee", "label": "generatedFact"},
+        RDFEdgeTypes.LGP_HAS_FACT: {"style": "solid", "arrow": "triangle", "label": "hasFact"},
+        RDFEdgeTypes.LGP_RELATES_TO: {"style": "dashed", "arrow": "none", "label": "relatesTo"},
+        RDFEdgeTypes.LGP_REPRESENTATION: {"style": "dotted", "arrow": "triangle", "label": "represents"},
+        RDFEdgeTypes.LGP_PART_OF: {"style": "solid", "arrow": "triangle", "label": "partOf"},
+        RDFEdgeTypes.LGP_NPMI_CORRELATION: {"style": "dashed", "arrow": "none", "label": "npmicorr"},
+        RDFEdgeTypes.LGP_IS_EPISODE: {"style": "solid", "arrow": "triangle", "label": "isEpisode"},
+    }
+    
+    # Category to CSS design token mapping (replaces hardcoded hex)
+    CATEGORY_TOKENS = {
+        "episodic": "var(--color-episodic, #3b82f6)",
+        "semantic": "var(--color-semantic, #10b981)",
+        "procedural": "var(--color-procedural, #f59e0b)",
+        "working": "var(--color-working, #8b5cf6)",
+        "meta": "var(--color-meta, #64748b)",
+        "subagent": "var(--color-subagent, #0ea5e9)",
+        "episode_completed": "var(--color-episode-completed, #38bdf8)",
+        "episode_failed": "var(--color-episode-failed, #ef4444)",
+        "episode_running": "var(--color-episode-running, #fbbf24)",
+        "fact_active": "var(--color-fact-active, #10b981)",
+        "fact_invalid": "var(--color-fact-invalid, #f43f5e)",
+        "falkor_entity": "var(--color-falkor-entity, #a855f7)",
+        "correlation_positive": "var(--color-corr-positive, #34d399)",
+        "correlation_negative": "var(--color-corr-negative, #f43f5e)",
+        "correlation_neutral": "var(--color-corr-neutral, #64748b)",
+    }
+
+    # Okabe-Ito CVD-safe color palette (color-vision-deficiency safe)
+    CVD_PALETTE = [
+        "#000000",  # Black
+        "#E69F00",  # Orange
+        "#56B4E9",  # Sky Blue
+        "#009E73",  # Bluish Green
+        "#F0E442",  # Yellow
+        "#0072B2",  # Blue
+        "#D55E00",  # Vermillion
+        "#CC79A7",  # Reddish Purple
+    ]
+
+    # CSS Design Tokens mapping (OPDA ADR-0043 compliant)
+    # These map to CSS custom properties defined in the application's DESIGN.md / global stylesheet
+    DESIGN_TOKENS = {
+        # Semantic colors
+        "--color-semantic": "#10b981",
+        "--color-episodic": "#3b82f6",
+        "--color-procedural": "#f59e0b",
+        "--color-working": "#8b5cf6",
+        "--color-meta": "#64748b",
+        "--color-subagent": "#0ea5e9",
+        # Episode status colors
+        "--color-episode-completed": "#38bdf8",
+        "--color-episode-failed": "#ef4444",
+        "--color-episode-running": "#fbbf24",
+        # Fact status colors
+        "--color-fact-active": "#10b981",
+        "--color-fact-invalid": "#f43f5e",
+        "--color-falkor-entity": "#a855f7",
+        # Correlation colors
+        "--color-corr-positive": "#34d399",
+        "--color-corr-negative": "#f43f5e",
+        "--color-corr-neutral": "#64748b",
+        # UI base colors
+        "--color-text-primary": "#1e293b",
+        "--color-text-outline": "#ffffff",
+        "--color-border": "#e2e8f0",
+        "--color-selection-border": "#3b82f6",
+        "--color-selection-box": "#3b82f6",
+        "--color-highlight": "#f59e0b",
+        "--color-edge-label-bg": "#ffffff",
+        "--color-active-bg": "transparent",
+        # Typography
+        "--font-family": "Inter, system-ui, sans-serif",
+        # Motion (respects prefers-reduced-motion)
+        "--animation-duration": "200ms",
+        "--animation-easing": "ease-out",
+    }
+
+
+# ============================================================================
+# Cytoscape.js Stylesheet Generator
+# ============================================================================
+class CytoscapeStylesheet:
+    """
+    Generator Cytoscape.js stylesheet JSON untuk knowledge graph visualization.
+    Memisahkan visual encoding dari data (standar Cytoscape.js + OPDA ADR-0043).
+    """
+    
+    def __init__(self, theme: str = "light"):
+        self.theme = theme
+        self._token_prefix = "--color"
+    
+    def generate(self) -> List[Dict[str, Any]]:
+        """Generate full stylesheet array per Cytoscape.js JSON spec."""
+        return [
+            # Core canvas
+            {
+                "selector": "core",
+                "style": {
+                    "selection-box-color": "var(--color-selection-box, #3b82f6)",
+                    "selection-box-opacity": 0.15,
+                    "selection-box-border-color": "var(--color-selection-border, #3b82f6)",
+                    "active-bg-color": "var(--color-active-bg, transparent)",
+                    "active-bg-opacity": 0,
+                    "active-bg-size": 0,
+                }
+            },
+            # Base node styles
+            {
+                "selector": "node",
+                "style": {
+                    "label": "data(label)",
+                    "font-size": "mapData(size, 10, 30, 8, 14)",
+                    "font-family": "var(--font-family, 'Inter, system-ui, sans-serif')",
+                    "color": "var(--color-text-primary, #1e293b)",
+                    "text-valign": "center",
+                    "text-halign": "center",
+                    "text-outline-width": 2,
+                    "text-outline-color": "var(--color-text-outline, #ffffff)",
+                    "text-wrap": "wrap",
+                    "text-max-width": 100,
+                    "background-color": "data(color)",
+                    "border-width": "mapData(charge, 0.5, 1.5, 1, 3)",
+                    "border-color": "var(--color-border, #e2e8f0)",
+                    "shape": "data(vowl_shape)",
+                    "width": "mapData(size, 10, 30, 20, 60)",
+                    "height": "mapData(size, 10, 30, 20, 60)",
+                    "overlay-padding": 6,
+                    "z-index": 10,
+                    "transition-property": "background-color, border-color, width, height, opacity",
+                    "transition-duration": "200ms",
+                }
+            },
+            # Node states
+            {
+                "selector": "node:selected",
+                "style": {
+                    "border-width": 4,
+                    "border-color": "var(--color-selection-border, #3b82f6)",
+                    "overlay-padding": 8,
+                    "z-index": 100,
+                }
+            },
+            {
+                "selector": "node.highlighted",
+                "style": {
+                    "border-width": 3,
+                    "border-color": "var(--color-highlight, #f59e0b)",
+                    "z-index": 50,
+                }
+            },
+            {
+                "selector": "node.faded",
+                "style": {
+                    "opacity": 0.25,
+                    "text-opacity": 0.25,
+                }
+            },
+            # Category-specific node styles (data-driven)
+            {
+                "selector": "node[category=\"episodic\"]",
+                "style": {
+                    "background-color": "var(--color-episodic, #3b82f6)",
+                }
+            },
+            {
+                "selector": "node[category=\"semantic\"]",
+                "style": {
+                    "background-color": "var(--color-semantic, #10b981)",
+                }
+            },
+            {
+                "selector": "node[category=\"procedural\"]",
+                "style": {
+                    "background-color": "var(--color-procedural, #f59e0b)",
+                }
+            },
+            {
+                "selector": "node[category=\"working\"]",
+                "style": {
+                    "background-color": "var(--color-working, #8b5cf6)",
+                }
+            },
+            {
+                "selector": "node[category=\"meta\"]",
+                "style": {
+                    "background-color": "var(--color-meta, #64748b)",
+                }
+            },
+            # Status-based styles
+            {
+                "selector": "node[status=\"invalid\"]",
+                "style": {
+                    "background-color": "var(--color-fact-invalid, #f43f5e)",
+                    "border-style": "dashed",
+                }
+            },
+            {
+                "selector": "node[status=\"decaying\"]",
+                "style": {
+                    "opacity": 0.6,
+                    "border-style": "dotted",
+                }
+            },
+            # Base edge styles
+            {
+                "selector": "edge",
+                "style": {
+                    "label": "data(relation_label)",
+                    "font-size": "mapData(weight, 0.4, 2.0, 7, 11)",
+                    "font-family": "var(--font-family, 'Inter, system-ui, sans-serif')",
+                    "color": "var(--color-text-primary, #1e293b)",
+                    "text-background-color": "var(--color-edge-label-bg, #ffffff)",
+                    "text-background-opacity": 0.85,
+                    "text-background-padding": 3,
+                    "text-background-shape": "roundrectangle",
+                    "curve-style": "bezier",
+                    "line-color": "data(edge_color)",
+                    "line-style": "data(edge_style)",
+                    "width": "mapData(weight, 0.4, 2.0, 1, 4)",
+                    "target-arrow-shape": "data(edge_arrow)",
+                    "target-arrow-color": "data(edge_color)",
+                    "arrow-scale": 1.2,
+                    "overlay-padding": 4,
+                    "z-index": 5,
+                    "transition-property": "line-color, width, opacity",
+                    "transition-duration": "200ms",
+                }
+            },
+            # Edge states
+            {
+                "selector": "edge:selected",
+                "style": {
+                    "width": 5,
+                    "line-color": "var(--color-selection-border, #3b82f6)",
+                    "target-arrow-color": "var(--color-selection-border, #3b82f6)",
+                    "z-index": 100,
+                }
+            },
+            {
+                "selector": "edge.highlighted",
+                "style": {
+                    "width": "mapData(weight, 0.4, 2.0, 3, 6)",
+                    "line-color": "var(--color-highlight, #f59e0b)",
+                    "target-arrow-color": "var(--color-highlight, #f59e0b)",
+                    "z-index": 50,
+                }
+            },
+            {
+                "selector": "edge.faded",
+                "style": {
+                    "opacity": 0.15,
+                    "text-opacity": 0.15,
+                }
+            },
+            # Edge type specific styles (data-driven via edge_type)
+            {
+                "selector": "edge[edge_type=\"rdfs:subClassOf\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"owl:ObjectProperty\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"owl:DatatypeProperty\"]",
+                "style": {
+                    "line-style": "dashed",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"owl:equivalentClass\"]",
+                "style": {
+                    "line-style": "dotted",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"owl:sameAs\"]",
+                "style": {
+                    "line-style": "dotted",
+                    "target-arrow-shape": "diamond",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"prov:wasGeneratedBy\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "vee",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"dcterms:isPartOf\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"skos:broader\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"skos:narrower\"]",
+                "style": {
+                    "line-style": "solid",
+                    "target-arrow-shape": "triangle",
+                }
+            },
+            {
+                "selector": "edge[edge_type=\"skos:related\"]",
+                "style": {
+                    "line-style": "dashed",
+                    "target-arrow-shape": "none",
+                }
+            },
+            # LGP custom edge types
+            {
+                "selector": "edge[edge_type^=\"lgp:\"]",
+                "style": {
+                    "line-style": "data(edge_style)",
+                    "target-arrow-shape": "data(edge_arrow)",
+                }
+            },
+            # Animated edges for correlations
+            {
+                "selector": "edge.animated",
+                "style": {
+                    "line-style": "dashed",
+                    "line-dash-pattern": [8, 4],
+                    "animation": "dash 1s linear infinite",
+                }
+            },
+        ]
+    
+    def to_json(self, indent: int = 2) -> str:
+        """Export stylesheet as JSON string."""
+        return json.dumps(self.generate(), indent=indent)
+    
+    def save(self, path: str) -> None:
+        """Save stylesheet to file."""
+        with open(path, "w") as f:
+            f.write(self.to_json())
+
+
+# ============================================================================
+# Graph Export Utilities (DOT, GraphML, Cytoscape JSON)
+# ============================================================================
+class GraphExporter:
+    """Export neuron graph ke format standar: DOT, GraphML, Cytoscape JSON."""
+    
+    def __init__(self, graph_data: Dict[str, Any]):
+        self.graph_data = graph_data
+        self.nodes = graph_data.get("nodes", [])
+        self.edges = graph_data.get("edges", [])
+    
+    def _node_id(self, node: Dict[str, Any]) -> str:
+        return node.get("id", "")
+    
+    def _sanitize_label(self, label: str) -> str:
+        """Escape label for DOT format."""
+        return label.replace('"', '\\"').replace("\n", "\\n")
+    
+    def to_dot(self, rankdir: str = "LR", compound: bool = True) -> str:
+        """Export ke GraphViz DOT format dengan subgraph clustering per kategori."""
+        lines = [
+            f'digraph "MiroFish Neuron Graph" {{',
+            f'  rankdir={rankdir};',
+            f'  compound={str(compound).lower()};',
+            f'  node [fontname="Inter", fontsize=10];',
+            f'  edge [fontname="Inter", fontsize=8];',
+            f'  bgcolor="transparent";',
+            "",
+        ]
+        
+        # Group nodes by category for subgraph clustering
+        categories: Dict[str, List[Dict[str, Any]]] = {}
+        for node in self.nodes:
+            cat = node.get("category", "unknown")
+            categories.setdefault(cat, []).append(node)
+        
+        # Write subgraphs (clusters) per category
+        for cat, cat_nodes in categories.items():
+            token = VisualNotation.CATEGORY_TOKENS.get(cat, "#64748b")
+            # Extract hex fallback from CSS var
+            hex_fallback = token.split(",")[-1].strip().rstrip(")") if "," in token else token
+            lines.append(f'  subgraph "cluster_{cat}" {{')
+            lines.append(f'    label = "{cat.upper()}";')
+            lines.append(f'    style = "rounded,dashed";')
+            lines.append(f'    color = "{hex_fallback}";')
+            lines.append(f'    fontcolor = "{hex_fallback}";')
+            for node in cat_nodes:
+                node_id = self._node_id(node)
+                label = self._sanitize_label(node.get("label", node_id))
+                shape = node.get("vowl_shape", VisualNotation.NODE_SHAPES.get(node.get("type", ""), "ellipse"))
+                size = node.get("size", 14)
+                color = node.get("color", hex_fallback)
+                charge = node.get("charge", 1.0)
+                lines.append(
+                    f'    "{node_id}" ['
+                    f'label="{label}", '
+                    f'shape={shape}, '
+                    f'width={size/14:.2f}, '
+                    f'height={size/14:.2f}, '
+                    f'fillcolor="{color}", '
+                    f'style="filled,rounded", '
+                    f'fontcolor="var(--color-text-primary, #1e293b)", '
+                    f'penwidth={max(1, charge*2):.1f}'
+                    f'];'
+                )
+            lines.append("  }")
+            lines.append("")
+        
+        # Write edges
+        for edge in self.edges:
+            src = edge.get("source", "")
+            tgt = edge.get("target", "")
+            if not src or not tgt:
+                continue
+            relation = edge.get("relation", "")
+            edge_type = edge.get("edge_type", relation)
+            weight = edge.get("weight", 1.0)
+            edge_color = edge.get("color", "#64748b")
+            edge_style = VisualNotation.EDGE_TYPES.get(edge_type, {}).get("style", "solid")
+            edge_arrow = VisualNotation.EDGE_TYPES.get(edge_type, {}).get("arrow", "vee")
+            
+            lines.append(
+                f'  "{src}" -> "{tgt}" ['
+                f'label="{self._sanitize_label(relation)}", '
+                f'penwidth={max(0.5, weight*2):.1f}, '
+                f'color="{edge_color}", '
+                f'style="{edge_style}", '
+                f'arrowhead="{edge_arrow}", '
+                f'fontcolor="var(--color-text-primary, #1e293b)"'
+                f'];'
+            )
+        
+        lines.append("}")
+        return "\n".join(lines)
+    
+    def to_graphml(self) -> str:
+        """Export ke GraphML format untuk Gephi/yEd/Cytoscape interoperability."""
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns"',
+            '         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+            '         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns',
+            '         http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">',
+            '  <key id="label" for="node" attr.name="label" attr.type="string"/>',
+            '  <key id="type" for="node" attr.name="type" attr.type="string"/>',
+            '  <key id="category" for="node" attr.name="category" attr.type="string"/>',
+            '  <key id="size" for="node" attr.name="size" attr.type="double"/>',
+            '  <key id="color" for="node" attr.name="color" attr.type="string"/>',
+            '  <key id="charge" for="node" attr.name="charge" attr.type="double"/>',
+            '  <key id="status" for="node" attr.name="status" attr.type="string"/>',
+            '  <key id="vowl_shape" for="node" attr.name="vowl_shape" attr.type="string"/>',
+            '  <key id="valid_at" for="node" attr.name="valid_at" attr.type="string"/>',
+            '  <key id="invalid_at" for="node" attr.name="invalid_at" attr.type="string"/>',
+            '  <key id="description" for="node" attr.name="description" attr.type="string"/>',
+            '  <key id="edge_type" for="edge" attr.name="edge_type" attr.type="string"/>',
+            '  <key id="relation" for="edge" attr.name="relation" attr.type="string"/>',
+            '  <key id="weight" for="edge" attr.name="weight" attr.type="double"/>',
+            '  <key id="color" for="edge" attr.name="color" attr.type="string"/>',
+            '  <key id="edge_style" for="edge" attr.name="edge_style" attr.type="string"/>',
+            '  <key id="edge_arrow" for="edge" attr.name="edge_arrow" attr.type="string"/>',
+            '  <key id="valid_at" for="edge" attr.name="valid_at" attr.type="string"/>',
+            '  <key id="invalid_at" for="edge" attr.name="invalid_at" attr.type="string"/>',
+            '  <key id="bitemporal" for="edge" attr.name="bitemporal" attr.type="boolean"/>',
+            '  <graph id="MiroFishNeuronGraph" edgedefault="directed">',
+        ]
+        
+        for node in self.nodes:
+            node_id = self._node_id(node)
+            lines.append(f'    <node id="{node_id}">')
+            lines.append(f'      <data key="label"><![CDATA[{node.get("label", node_id)}]]></data>')
+            lines.append(f'      <data key="type"><![CDATA[{node.get("type", "")}]]></data>')
+            lines.append(f'      <data key="category"><![CDATA[{node.get("category", "")}]]></data>')
+            lines.append(f'      <data key="size">{node.get("size", 14)}</data>')
+            lines.append(f'      <data key="color"><![CDATA[{node.get("color", "")}]]></data>')
+            lines.append(f'      <data key="charge">{node.get("charge", 1.0)}</data>')
+            lines.append(f'      <data key="status"><![CDATA[{node.get("status", "active")}]]></data>')
+            lines.append(f'      <data key="vowl_shape"><![CDATA[{node.get("vowl_shape", VisualNotation.NODE_SHAPES.get(node.get("type", ""), "ellipse"))}]]></data>')
+            if node.get("valid_at"):
+                lines.append(f'      <data key="valid_at"><![CDATA[{node.get("valid_at")}]]></data>')
+            if node.get("invalid_at"):
+                lines.append(f'      <data key="invalid_at"><![CDATA[{node.get("invalid_at")}]]></data>')
+            if node.get("description"):
+                lines.append(f'      <data key="description"><![CDATA[{node.get("description")}]]></data>')
+            lines.append("    </node>")
+        
+        for edge in self.edges:
+            src = edge.get("source", "")
+            tgt = edge.get("target", "")
+            if not src or not tgt:
+                continue
+            edge_id = edge.get("id", f"{src}->{tgt}")
+            lines.append(f'    <edge id="{edge_id}" source="{src}" target="{tgt}">')
+            lines.append(f'      <data key="edge_type"><![CDATA[{edge.get("edge_type", edge.get("relation", ""))}]]></data>')
+            lines.append(f'      <data key="relation"><![CDATA[{edge.get("relation", "")}]]></data>')
+            lines.append(f'      <data key="weight">{edge.get("weight", 1.0)}</data>')
+            lines.append(f'      <data key="color"><![CDATA[{edge.get("color", "#64748b")}]]></data>')
+            edge_type = edge.get("edge_type", edge.get("relation", ""))
+            vinfo = VisualNotation.EDGE_TYPES.get(edge_type, {})
+            lines.append(f'      <data key="edge_style"><![CDATA[{vinfo.get("style", "solid")}]]></data>')
+            lines.append(f'      <data key="edge_arrow"><![CDATA[{vinfo.get("arrow", "vee")}]]></data>')
+            if edge.get("valid_at"):
+                lines.append(f'      <data key="valid_at"><![CDATA[{edge.get("valid_at")}]]></data>')
+            if edge.get("invalid_at"):
+                lines.append(f'      <data key="invalid_at"><![CDATA[{edge.get("invalid_at")}]]></data>')
+            if edge.get("bitemporal"):
+                lines.append(f'      <data key="bitemporal">true</data>')
+            lines.append("    </edge>")
+        
+        lines.extend(["  </graph>", "</graphml>"])
+        return "\n".join(lines)
+    
+    def to_cytoscape_json(self) -> Dict[str, Any]:
+        """Export ke Cytoscape.js JSON format (elements + stylesheet)."""
+        elements = {"nodes": [], "edges": []}
+        
+        for node in self.nodes:
+            node_id = self._node_id(node)
+            shape = node.get("vowl_shape", VisualNotation.NODE_SHAPES.get(node.get("type", ""), "ellipse"))
+            elements["nodes"].append({
+                "data": {
+                    "id": node_id,
+                    "label": node.get("label", node_id),
+                    "type": node.get("type", ""),
+                    "category": node.get("category", ""),
+                    "size": node.get("size", 14),
+                    "color": node.get("color", "#64748b"),
+                    "charge": node.get("charge", 1.0),
+                    "status": node.get("status", "active"),
+                    "vowl_shape": shape,
+                    "valid_at": node.get("valid_at"),
+                    "invalid_at": node.get("invalid_at"),
+                    "description": node.get("description", ""),
+                    **node.get("attributes", {}),
+                },
+                "classes": f"{node.get('category', '')} {node.get('status', '')}",
+            })
+        
+        for edge in self.edges:
+            src = edge.get("source", "")
+            tgt = edge.get("target", "")
+            if not src or not tgt:
+                continue
+            edge_type = edge.get("edge_type", edge.get("relation", ""))
+            vinfo = VisualNotation.EDGE_TYPES.get(edge_type, {})
+            edge_data = {
+                "id": edge.get("id", f"{src}->{tgt}"),
+                "source": src,
+                "target": tgt,
+                "relation": edge.get("relation", ""),
+                "relation_label": edge.get("relation", ""),
+                "edge_type": edge_type,
+                "weight": edge.get("weight", 1.0),
+                "edge_color": edge.get("color", "#64748b"),
+                "edge_style": vinfo.get("style", "solid"),
+                "edge_arrow": vinfo.get("arrow", "vee"),
+                "valid_at": edge.get("valid_at"),
+                "invalid_at": edge.get("invalid_at"),
+                "bitemporal": edge.get("bitemporal", False),
+                "detail": edge.get("detail", ""),
+            }
+            classes = []
+            if edge.get("animated"):
+                classes.append("animated")
+            elements["edges"].append({
+                "data": edge_data,
+                "classes": " ".join(classes) if classes else "",
+            })
+        
+        return {
+            "elements": elements,
+            "stylesheet": CytoscapeStylesheet().generate(),
+            "metadata": {
+                "engine": self.graph_data.get("engine", "Graphiti"),
+                "style": self.graph_data.get("style", "MiroFish Spiking Neuron Architecture"),
+                "timestamp": self.graph_data.get("timestamp", time.time()),
+                "stats": self.graph_data.get("stats", {}),
+            }
+        }
+    
+    def save_all(self, base_path: str) -> Dict[str, str]:
+        """Save all export formats to files."""
+        outputs = {}
+        
+        # DOT
+        dot_path = f"{base_path}.dot"
+        with open(dot_path, "w") as f:
+            f.write(self.to_dot())
+        outputs["dot"] = dot_path
+        
+        # GraphML
+        graphml_path = f"{base_path}.graphml"
+        with open(graphml_path, "w") as f:
+            f.write(self.to_graphml())
+        outputs["graphml"] = graphml_path
+        
+        # Cytoscape JSON
+        cyto_path = f"{base_path}.cyto.json"
+        with open(cyto_path, "w") as f:
+            json.dump(self.to_cytoscape_json(), f, indent=2)
+        outputs["cytoscape_json"] = cyto_path
+        
+        # Stylesheet JSON (standalone)
+        style_path = f"{base_path}.stylesheet.json"
+        CytoscapeStylesheet().save(style_path)
+        outputs["stylesheet"] = style_path
+        
+        return outputs
 
 
 class BiTemporalEdge(BaseModel):
@@ -172,6 +880,14 @@ class GraphitiMemoryEngine:
     FALKORDB_PORT = int(os.environ.get("FALKORDB_PORT", "6382"))
     FALKORDB_DB = os.environ.get("FALKORDB_DB", "langgraph")
 
+    # Supabase / PostgreSQL configuration
+    SUPABASE_DB_HOST = os.environ.get("SUPABASE_DB_HOST", "127.0.0.1")
+    SUPABASE_DB_PORT = int(os.environ.get("SUPABASE_DB_PORT", "5432"))
+    SUPABASE_DB_NAME = os.environ.get("SUPABASE_DB_NAME", "postgres")
+    SUPABASE_DB_USER = os.environ.get("SUPABASE_DB_USER", "postgres")
+    SUPABASE_DB_PASSWORD = os.environ.get("SUPABASE_DB_PASSWORD", "")
+    SUPABASE_SCHEMA = os.environ.get("SUPABASE_SCHEMA", "langgraph")
+
     ROUTER_BASE_URL = resolve_router_base_url()
     ROUTER_API_KEY = os.environ.get("ROUTER_API_KEY", os.environ.get("NINE_ROUTER_API_KEY", ""))
     ROUTER_LLM_MODEL = os.environ.get("ROUTER_LLM_MODEL", "hermes")
@@ -183,6 +899,8 @@ class GraphitiMemoryEngine:
     _driver_loop: Optional[asyncio.AbstractEventLoop] = None
     _graphiti: Optional[Any] = None
     _graphiti_loop: Optional[asyncio.AbstractEventLoop] = None
+    _pg_pool: Optional[Any] = None
+    _pg_pool_loop: Optional[asyncio.AbstractEventLoop] = None
     _falkor_available: bool = True
 
     @classmethod
@@ -214,6 +932,47 @@ class GraphitiMemoryEngine:
         except Exception as e:
             cls._falkor_available = False
             logger.warning("FalkorDB tidak dapat dihubungi (%s). Menggunakan fallback.", e)
+            return None
+
+    @classmethod
+    async def get_pg_pool(cls) -> Optional[Any]:
+        """Lazy initialization asyncpg connection pool for Supabase/PostgreSQL."""
+        try:
+            import asyncpg
+        except ImportError:
+            logger.warning("asyncpg tidak terinstall; PostgreSQL pool tidak tersedia.")
+            return None
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if cls._pg_pool is not None and cls._pg_pool_loop is current_loop:
+            return cls._pg_pool
+
+        try:
+            pool = await asyncpg.create_pool(
+                host=cls.SUPABASE_DB_HOST,
+                port=cls.SUPABASE_DB_PORT,
+                user=cls.SUPABASE_DB_USER,
+                password=cls.SUPABASE_DB_PASSWORD,
+                database=cls.SUPABASE_DB_NAME,
+                min_size=2,
+                max_size=10,
+                command_timeout=30,
+            )
+            # Test connection and set search_path
+            async with pool.acquire() as conn:
+                await conn.execute(f"SET search_path TO {cls.SUPABASE_SCHEMA}, public")
+                version = await conn.fetchval("SELECT version()")
+                logger.info("PostgreSQL pool terhubung ke %s:%s (schema: %s) - %s", 
+                           cls.SUPABASE_DB_HOST, cls.SUPABASE_DB_PORT, cls.SUPABASE_SCHEMA, version[:80])
+            cls._pg_pool = pool
+            cls._pg_pool_loop = current_loop
+            return cls._pg_pool
+        except Exception as e:
+            logger.warning("PostgreSQL pool tidak dapat dihubungi (%s). Menggunakan fallback.", e)
             return None
 
     @classmethod
@@ -380,17 +1139,18 @@ class GraphitiMemoryEngine:
                 "charge": 1.0,
                 "status": "active",
                 "size": 24,
-                "color": MemoryTaxonomy.CATEGORY_COLORS.get(cat.lower(), "#64748b")
+                "color": MemoryTaxonomy.CATEGORY_COLORS.get(cat.lower(), "#64748b"),
+                "source": "taxonomy"
             })
             node_map.add(cat_id)
 
-        # 2. Ambil 10 Subagent dari DB relasional
-        db = await get_db_connection()
-        try:
-            async with db.execute(
-                "SELECT id, name, role, pod, capabilities, model_policy, budget_config, trust_level FROM subagent_registry"
-            ) as cursor:
-                subagents = await cursor.fetchall()
+        # 2. Ambil 10 Subagent dari DB relasional (PostgreSQL/Supabase)
+        pool = await cls.get_pg_pool()
+        if pool is not None:
+            async with pool.acquire() as conn:
+                subagents = await conn.fetch(
+                    "SELECT id, name, role, pod, capabilities, model_policy, budget_config, trust_level FROM langgraph.subagent_registry"
+                )
                 for sa_row in subagents:
                     sa = dict(sa_row)
                     sa_id = f"agent-{sa['id']}"
@@ -402,7 +1162,11 @@ class GraphitiMemoryEngine:
                         "charge": 0.9,
                         "status": "active",
                         "size": 18,
-                        "color": "#0ea5e9",
+                        "color": VisualNotation.CATEGORY_TOKENS.get("subagent", "var(--color-subagent, #0ea5e9)"),
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("subagent", "ellipse"),
+                        "valid_at": datetime.now(timezone.utc).isoformat(),
+                        "invalid_at": None,
+                        "source": "postgresql",
                         "attributes": {
                             "role": sa["role"],
                             "pod": sa["pod"],
@@ -417,39 +1181,52 @@ class GraphitiMemoryEngine:
                         "source": sa_id,
                         "target": "cat-procedural",
                         "relation": "HAS_CAPABILITY",
+                        "edge_type": RDFEdgeTypes.LGP_HAS_CAPABILITY,
                         "weight": 0.8,
-                        "color": "#334155"
+                        "color": VisualNotation.CATEGORY_TOKENS.get("correlation_neutral", "var(--color-corr-neutral, #64748b)"),
+                        "valid_at": datetime.now(timezone.utc).isoformat(),
+                        "invalid_at": None,
+                        "bitemporal": True
                     })
 
-            # 3. Ambil Inter-Neuron Correlation Edges
-            async with db.execute(
-                "SELECT source_subagent, target_subagent, composite_weight, npmi_coactivation, polarity "
-                "FROM correlation_edges WHERE composite_weight > 0"
-            ) as cursor:
-                corr_rows = await cursor.fetchall()
+            # 3. Ambil Inter-Neuron Correlation Edges (PostgreSQL/Supabase)
+            if pool is not None:
+                async with pool.acquire() as conn:
+                    corr_rows = await conn.fetch(
+                        "SELECT source_subagent, target_subagent, composite_weight, npmi_coactivation, polarity "
+                        "FROM langgraph.correlation_edges WHERE composite_weight > 0"
+                    )
                 for r in corr_rows:
                     corr = dict(r)
                     src = f"agent-{corr['source_subagent']}"
                     tgt = f"agent-{corr['target_subagent']}"
                     if src in node_map and tgt in node_map:
-                        edge_color = "#34d399" if corr["polarity"] == "positive" else ("#f43f5e" if corr["polarity"] == "negative" else "#64748b")
+                        edge_color = VisualNotation.CATEGORY_TOKENS.get("correlation_positive", "var(--color-corr-positive, #34d399)") if corr["polarity"] == "positive" else (
+                            VisualNotation.CATEGORY_TOKENS.get("correlation_negative", "var(--color-corr-negative, #f43f5e)") if corr["polarity"] == "negative" else 
+                            VisualNotation.CATEGORY_TOKENS.get("correlation_neutral", "var(--color-corr-neutral, #64748b)")
+                        )
                         edges.append({
                             "id": f"corr-{corr['source_subagent']}-{corr['target_subagent']}",
                             "source": src,
                             "target": tgt,
                             "relation": f"NPMI: {corr['npmi_coactivation']:.2f}",
+                            "edge_type": RDFEdgeTypes.LGP_NPMI_CORRELATION,
                             "weight": max(0.5, corr["composite_weight"] * 2),
                             "color": edge_color,
-                            "animated": True
+                            "animated": True,
+                            "valid_at": datetime.now(timezone.utc).isoformat(),
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
-            # 4. Ambil Semua Execution Runs dari DB Relasional (Histori Episode Lengkap)
+            # 4. Ambil Semua Execution Runs dari DB Relasional (Histori Episode Lengkap) - PostgreSQL
             db_runs_count = 0
-            async with db.execute(
-                "SELECT run_id, thread_id, status, objective, current_subagent, created_at "
-                "FROM runs ORDER BY created_at DESC"
-            ) as cursor:
-                runs_rows = await cursor.fetchall()
+            if pool is not None:
+                async with pool.acquire() as conn:
+                    runs_rows = await conn.fetch(
+                        "SELECT run_id, thread_id, status, objective, current_subagent, created_at "
+                        "FROM langgraph.runs ORDER BY created_at DESC"
+                    )
                 for r in runs_rows:
                     run_dict = dict(r)
                     run_id = run_dict["run_id"]
@@ -461,7 +1238,10 @@ class GraphitiMemoryEngine:
                     obj = run_dict.get("objective") or f"Run {run_id[:8]}"
                     created_at = run_dict.get("created_at")
                     created_at_str = created_at.isoformat() if created_at is not None and hasattr(created_at, "isoformat") else (str(created_at) if created_at is not None else "")
-                    color = "#38bdf8" if status == "completed" else ("#ef4444" if status == "failed" else "#fbbf24")
+                    color = VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)") if status == "completed" else (
+                        VisualNotation.CATEGORY_TOKENS.get("episode_failed", "var(--color-episode-failed, #ef4444)") if status == "failed" else
+                        VisualNotation.CATEGORY_TOKENS.get("episode_running", "var(--color-episode-running, #fbbf24)")
+                    )
 
                     nodes.append({
                         "id": node_id,
@@ -472,8 +1252,10 @@ class GraphitiMemoryEngine:
                         "status": status,
                         "size": 13,
                         "color": color,
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("episode", "rectangle"),
                         "valid_at": created_at_str,
                         "invalid_at": None,
+                        "source": "postgresql",
                         "episode_run_id": run_id,
                         "description": f"Objective: {obj} | Status: {status} | Subagent: {subagent}",
                         "attributes": {
@@ -495,8 +1277,12 @@ class GraphitiMemoryEngine:
                             "source": node_id,
                             "target": "cat-episodic",
                             "relation": "IS_EPISODE",
+                            "edge_type": RDFEdgeTypes.LGP_IS_EPISODE,
                             "weight": 0.7,
-                            "color": "#0284c7"
+                            "color": VisualNotation.CATEGORY_TOKENS.get("episodic", "var(--color-episodic, #3b82f6)"),
+                            "valid_at": created_at_str,
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
                     sa_node = f"agent-{subagent}"
@@ -506,17 +1292,22 @@ class GraphitiMemoryEngine:
                             "source": sa_node,
                             "target": node_id,
                             "relation": "EXECUTED",
+                            "edge_type": RDFEdgeTypes.LGP_EXECUTED,
                             "weight": 1.0,
-                            "color": "#38bdf8"
+                            "color": VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)"),
+                            "valid_at": created_at_str,
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
-            # 5. Ambil Semua Temporal Facts dari DB Relasional (Bi-temporal Semantic Neurons)
+            # 5. Ambil Semua Temporal Facts dari DB Relasional (Bi-temporal Semantic Neurons) - PostgreSQL
             db_facts_count = 0
-            async with db.execute(
-                "SELECT fact_id, subject, predicate, object, valid_at, invalid_at, created_at, episode_run_id, pii_redacted "
-                "FROM temporal_facts ORDER BY created_at DESC"
-            ) as cursor:
-                facts_rows = await cursor.fetchall()
+            if pool is not None:
+                async with pool.acquire() as conn:
+                    facts_rows = await conn.fetch(
+                        "SELECT fact_id, subject, predicate, object, valid_at, invalid_at, created_at, episode_run_id, pii_redacted "
+                        "FROM langgraph.temporal_facts ORDER BY created_at DESC"
+                    )
                 for f_row in facts_rows:
                     fact = dict(f_row)
                     fact_id = fact["fact_id"]
@@ -541,20 +1332,48 @@ class GraphitiMemoryEngine:
                     elif fact.get("episode_run_id"):
                         cat_key = "episodic"
 
+                    cat_token = VisualNotation.CATEGORY_TOKENS.get(cat_key, "var(--color-semantic, #10b981)")
+                    fact_color = VisualNotation.CATEGORY_TOKENS.get("fact_invalid", "var(--color-fact-invalid, #f43f5e)") if is_invalid else cat_token
+                    fact_size = 11 if is_invalid else 14
+                    fact_charge = 0.5 if is_invalid else 0.85
+                    fact_status = "invalid" if is_invalid else "active"
+
+                    # Map predicate to RDF/OWL standard edge type
+                    pred_lower = pred.lower()
+                    edge_type = RDFEdgeTypes.LGP_HAS_FACT
+                    if pred_lower in ["type", "rdf:type", "a"]:
+                        edge_type = RDFEdgeTypes.RDF_TYPE
+                    elif pred_lower in ["subclassof", "rdfs:subclassof"]:
+                        edge_type = RDFEdgeTypes.RDFS_SUBCLASS_OF
+                    elif pred_lower in ["partof", "dcterms:ispartof"]:
+                        edge_type = RDFEdgeTypes.DCTERMS_IS_PART_OF
+                    elif pred_lower in ["generatedby", "prov:wasgeneratedby"]:
+                        edge_type = RDFEdgeTypes.PROV_WAS_GENERATED_BY
+                    elif pred_lower in ["broader", "skos:broader"]:
+                        edge_type = RDFEdgeTypes.SKOS_BROADER
+                    elif pred_lower in ["narrower", "skos:narrower"]:
+                        edge_type = RDFEdgeTypes.SKOS_NARROWER
+                    elif pred_lower in ["related", "skos:related"]:
+                        edge_type = RDFEdgeTypes.SKOS_RELATED
+                    elif pred_lower in ["sameas", "owl:sameas"]:
+                        edge_type = RDFEdgeTypes.OWL_SAME_AS
+
                     nodes.append({
                         "id": node_id,
                         "label": f"{subj[:18]}: {pred[:12]}",
                         "type": "fact_entity",
                         "category": cat_key,
-                        "charge": 0.5 if is_invalid else 0.85,
-                        "status": "invalid" if is_invalid else "active",
-                        "size": 11 if is_invalid else 14,
-                        "color": "#f43f5e" if is_invalid else "#10b981",
+                        "charge": fact_charge,
+                        "status": fact_status,
+                        "size": fact_size,
+                        "color": fact_color,
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("fact_entity", "roundrectangle"),
+                        "valid_at": valid_at_str,
+                        "invalid_at": invalid_at_str,
+                        "source": "postgresql",
                         "subject": subj,
                         "predicate": pred,
                         "object": obj,
-                        "valid_at": valid_at_str,
-                        "invalid_at": invalid_at_str,
                         "episode_run_id": fact.get("episode_run_id"),
                         "description": f"{subj} -> {pred} -> {obj[:120]}",
                         "attributes": {
@@ -576,8 +1395,12 @@ class GraphitiMemoryEngine:
                             "source": node_id,
                             "target": cat_target,
                             "relation": "HAS_FACT",
+                            "edge_type": RDFEdgeTypes.LGP_HAS_FACT,
                             "weight": 0.6,
-                            "color": "#334155"
+                            "color": VisualNotation.CATEGORY_TOKENS.get(cat_key, "var(--color-semantic, #10b981)"),
+                            "valid_at": valid_at_str,
+                            "invalid_at": invalid_at_str,
+                            "bitemporal": True
                         })
 
                     ep_id = fact.get("episode_run_id")
@@ -589,8 +1412,9 @@ class GraphitiMemoryEngine:
                                 "source": run_target,
                                 "target": node_id,
                                 "relation": "GENERATED_FACT",
+                                "edge_type": RDFEdgeTypes.LGP_GENERATED_FACT,
                                 "weight": 0.8,
-                                "color": "#10b981",
+                                "color": VisualNotation.CATEGORY_TOKENS.get("fact_active", "var(--color-fact-active, #10b981)"),
                                 "bitemporal": True,
                                 "valid_at": valid_at_str,
                                 "invalid_at": invalid_at_str
@@ -605,12 +1429,13 @@ class GraphitiMemoryEngine:
                                     "source": sa_node,
                                     "target": node_id,
                                     "relation": "RELATES_TO",
+                                    "edge_type": RDFEdgeTypes.LGP_RELATES_TO,
                                     "weight": 0.7,
-                                    "color": "#6366f1"
+                                    "color": VisualNotation.CATEGORY_TOKENS.get("subagent", "var(--color-subagent, #0ea5e9)"),
+                                    "valid_at": valid_at_str,
+                                    "invalid_at": invalid_at_str,
+                                    "bitemporal": True
                                 })
-        finally:
-            await db.close()
-
         # 6. Query FalkorDB Cypher untuk Node Entitas & Episode Tambahan
         nodes_res = await driver.execute_query("MATCH (n) RETURN labels(n) AS labels, properties(n) AS props")
         falkor_nodes_raw = nodes_res[0] if nodes_res else []
@@ -634,7 +1459,7 @@ class GraphitiMemoryEngine:
                     continue
                 ntype = "episode"
                 ncat = "episodic"
-                color = "#3b82f6"
+                color = VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)")
                 size = 13
                 falkor_episode_count += 1
             else:
@@ -643,7 +1468,7 @@ class GraphitiMemoryEngine:
                     continue
                 ntype = "fact_entity"
                 ncat = "semantic"
-                color = "#a855f7"
+                color = VisualNotation.CATEGORY_TOKENS.get("falkor_entity", "var(--color-falkor-entity, #a855f7)")
                 size = 15
                 falkor_entity_count += 1
 
@@ -656,8 +1481,10 @@ class GraphitiMemoryEngine:
                 "status": "active",
                 "size": size,
                 "color": color,
+                "vowl_shape": VisualNotation.NODE_SHAPES.get(ntype, "ellipse"),
                 "valid_at": props.get("valid_at") or props.get("created_at"),
                 "invalid_at": props.get("invalid_at"),
+                "source": "falkordb",
                 "attributes": {
                     "uuid": uuid,
                     "summary": props.get("summary") or props.get("content") or "",
@@ -674,8 +1501,12 @@ class GraphitiMemoryEngine:
                     "source": node_id,
                     "target": cat_target,
                     "relation": "PART_OF",
+                    "edge_type": RDFEdgeTypes.LGP_PART_OF,
                     "weight": 0.6,
-                    "color": "#475569"
+                    "color": VisualNotation.CATEGORY_TOKENS.get(ncat, "var(--color-semantic, #10b981)"),
+                    "valid_at": props.get("valid_at") or props.get("created_at"),
+                    "invalid_at": props.get("invalid_at"),
+                    "bitemporal": True
                 })
 
             # Hubungkan ke subagent jika entitas mereferensikan nama subagent
@@ -688,8 +1519,12 @@ class GraphitiMemoryEngine:
                             "source": sa_node,
                             "target": node_id,
                             "relation": "REPRESENTATION",
+                            "edge_type": RDFEdgeTypes.LGP_REPRESENTATION,
                             "weight": 1.4,
-                            "color": "#38bdf8"
+                            "color": VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)"),
+                            "valid_at": props.get("valid_at") or props.get("created_at"),
+                            "invalid_at": props.get("invalid_at"),
+                            "bitemporal": True
                         })
                     break
 
@@ -721,17 +1556,41 @@ class GraphitiMemoryEngine:
                 invalid_at = rel_props.get("invalid_at")
                 is_invalid = bool(invalid_at)
 
+                # Map FalkorDB rel_type to RDF/OWL standard
+                rel_type_lower = rel_type.lower()
+                edge_type = RDFEdgeTypes.LGP_RELATES_TO
+                if rel_type_lower in ["type", "rdf:type"]:
+                    edge_type = RDFEdgeTypes.RDF_TYPE
+                elif rel_type_lower in ["subclassof", "rdfs:subclassof"]:
+                    edge_type = RDFEdgeTypes.RDFS_SUBCLASS_OF
+                elif rel_type_lower in ["partof", "dcterms:ispartof", "contains"]:
+                    edge_type = RDFEdgeTypes.DCTERMS_IS_PART_OF
+                elif rel_type_lower in ["generatedby", "prov:wasgeneratedby"]:
+                    edge_type = RDFEdgeTypes.PROV_WAS_GENERATED_BY
+                elif rel_type_lower in ["mentions", "refers_to"]:
+                    edge_type = RDFEdgeTypes.LGP_RELATES_TO
+                elif rel_type_lower in ["represents", "representation"]:
+                    edge_type = RDFEdgeTypes.LGP_REPRESENTATION
+                elif rel_type_lower in ["sameas", "owl:sameas"]:
+                    edge_type = RDFEdgeTypes.OWL_SAME_AS
+
+                edge_color = VisualNotation.CATEGORY_TOKENS.get("fact_invalid", "var(--color-fact-invalid, #f43f5e)") if is_invalid else (
+                    VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #60a5fa)") if rel_type == "MENTIONS" else
+                    VisualNotation.CATEGORY_TOKENS.get("fact_active", "var(--color-fact-active, #10b981)")
+                )
+
                 edge_uuid = rel_props.get("uuid") or f"{src_uuid[:8]}-{tgt_uuid[:8]}_{relation_name}"
                 edges.append({
                     "id": f"falkor-{edge_uuid}",
                     "source": src_id,
                     "target": tgt_id,
                     "relation": relation_name,
+                    "edge_type": edge_type,
                     "detail": rel_props.get("fact") or "",
                     "valid_at": valid_at,
                     "invalid_at": invalid_at,
                     "weight": 1.2 if not is_invalid else 0.4,
-                    "color": "#f43f5e" if is_invalid else ("#60a5fa" if rel_type == "MENTIONS" else "#10b981"),
+                    "color": edge_color,
                     "bitemporal": True
                 })
 
@@ -774,7 +1633,10 @@ class GraphitiMemoryEngine:
                     "charge": 1.0,
                     "status": "active",
                     "size": 24,
-                    "color": MemoryTaxonomy.CATEGORY_COLORS.get(cat.lower(), "#64748b")
+                    "color": VisualNotation.CATEGORY_TOKENS.get(cat.lower(), "var(--color-meta, #64748b)"),
+                    "vowl_shape": VisualNotation.NODE_SHAPES.get("category", "ellipse"),
+                    "valid_at": datetime.now(timezone.utc).isoformat(),
+                    "invalid_at": None
                 })
                 node_map.add(cat_id)
 
@@ -794,7 +1656,11 @@ class GraphitiMemoryEngine:
                         "charge": 0.9,
                         "status": "active",
                         "size": 18,
-                        "color": "#0ea5e9",
+                        "color": VisualNotation.CATEGORY_TOKENS.get("subagent", "var(--color-subagent, #0ea5e9)"),
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("subagent", "ellipse"),
+                        "valid_at": datetime.now(timezone.utc).isoformat(),
+                        "invalid_at": None,
+                        "source": "postgresql",
                         "attributes": {
                             "role": sa["role"],
                             "pod": sa["pod"],
@@ -808,8 +1674,12 @@ class GraphitiMemoryEngine:
                         "source": sa_id,
                         "target": "cat-procedural",
                         "relation": "HAS_CAPABILITY",
+                        "edge_type": RDFEdgeTypes.LGP_HAS_CAPABILITY,
                         "weight": 0.8,
-                        "color": "#334155"
+                        "color": VisualNotation.CATEGORY_TOKENS.get("correlation_neutral", "var(--color-corr-neutral, #64748b)"),
+                        "valid_at": datetime.now(timezone.utc).isoformat(),
+                        "invalid_at": None,
+                        "bitemporal": True
                     })
 
             # Execution Runs dari DB Relasional
@@ -829,7 +1699,13 @@ class GraphitiMemoryEngine:
                     obj = run_dict.get("objective") or f"Run {run_id[:8]}"
                     created_at = run_dict.get("created_at")
                     created_at_str = created_at.isoformat() if created_at is not None and hasattr(created_at, "isoformat") else (str(created_at) if created_at is not None else "")
-                    color = "#38bdf8" if status == "completed" else ("#ef4444" if status == "failed" else "#fbbf24")
+                    
+                    status_colors = {
+                        "completed": VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)"),
+                        "failed": VisualNotation.CATEGORY_TOKENS.get("episode_failed", "var(--color-episode-failed, #ef4444)"),
+                        "running": VisualNotation.CATEGORY_TOKENS.get("episode_running", "var(--color-episode-running, #fbbf24)"),
+                    }
+                    color = status_colors.get(status, VisualNotation.CATEGORY_TOKENS.get("episode_running", "var(--color-episode-running, #fbbf24)"))
 
                     nodes.append({
                         "id": node_id,
@@ -840,6 +1716,7 @@ class GraphitiMemoryEngine:
                         "status": status,
                         "size": 13,
                         "color": color,
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("episode", "rectangle"),
                         "valid_at": created_at_str,
                         "invalid_at": None,
                         "episode_run_id": run_id,
@@ -853,8 +1730,12 @@ class GraphitiMemoryEngine:
                             "source": node_id,
                             "target": "cat-episodic",
                             "relation": "IS_EPISODE",
+                            "edge_type": RDFEdgeTypes.LGP_IS_EPISODE,
                             "weight": 0.7,
-                            "color": "#0284c7"
+                            "color": VisualNotation.CATEGORY_TOKENS.get("episodic", "var(--color-episodic, #3b82f6)"),
+                            "valid_at": created_at_str,
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
                     sa_node = f"agent-{subagent}"
@@ -864,8 +1745,12 @@ class GraphitiMemoryEngine:
                             "source": sa_node,
                             "target": node_id,
                             "relation": "EXECUTED",
+                            "edge_type": RDFEdgeTypes.LGP_EXECUTED,
                             "weight": 1.0,
-                            "color": "#38bdf8"
+                            "color": VisualNotation.CATEGORY_TOKENS.get("episode_completed", "var(--color-episode-completed, #38bdf8)"),
+                            "valid_at": created_at_str,
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
             # Temporal Facts dari DB
@@ -894,15 +1779,44 @@ class GraphitiMemoryEngine:
                     elif fact.get("episode_run_id"):
                         cat_key = "episodic"
 
+                    cat_token = VisualNotation.CATEGORY_TOKENS.get(cat_key, "var(--color-semantic, #10b981)")
+                    fact_color = VisualNotation.CATEGORY_TOKENS.get("fact_invalid", "var(--color-fact-invalid, #f43f5e)") if is_invalid else cat_token
+                    fact_size = 11 if is_invalid else 14
+                    fact_charge = 0.5 if is_invalid else 0.85
+                    fact_status = "invalid" if is_invalid else "active"
+
+                    pred_lower = pred.lower()
+                    edge_type = RDFEdgeTypes.LGP_HAS_FACT
+                    if pred_lower in ["type", "rdf:type", "a"]:
+                        edge_type = RDFEdgeTypes.RDF_TYPE
+                    elif pred_lower in ["subclassof", "rdfs:subclassof"]:
+                        edge_type = RDFEdgeTypes.RDFS_SUBCLASS_OF
+                    elif pred_lower in ["partof", "dcterms:ispartof"]:
+                        edge_type = RDFEdgeTypes.DCTERMS_IS_PART_OF
+                    elif pred_lower in ["generatedby", "prov:wasgeneratedby"]:
+                        edge_type = RDFEdgeTypes.PROV_WAS_GENERATED_BY
+                    elif pred_lower in ["broader", "skos:broader"]:
+                        edge_type = RDFEdgeTypes.SKOS_BROADER
+                    elif pred_lower in ["narrower", "skos:narrower"]:
+                        edge_type = RDFEdgeTypes.SKOS_NARROWER
+                    elif pred_lower in ["related", "skos:related"]:
+                        edge_type = RDFEdgeTypes.SKOS_RELATED
+                    elif pred_lower in ["sameas", "owl:sameas"]:
+                        edge_type = RDFEdgeTypes.OWL_SAME_AS
+
                     nodes.append({
                         "id": node_id,
                         "label": f"{subj[:18]}: {pred[:12]}",
                         "type": "fact_entity",
                         "category": cat_key,
-                        "charge": 0.5 if is_invalid else 0.85,
-                        "status": "invalid" if is_invalid else "active",
-                        "size": 11 if is_invalid else 14,
-                        "color": "#f43f5e" if is_invalid else "#10b981",
+                        "charge": fact_charge,
+                        "status": fact_status,
+                        "size": fact_size,
+                        "color": fact_color,
+                        "vowl_shape": VisualNotation.NODE_SHAPES.get("fact_entity", "roundrectangle"),
+                        "subject": subj,
+                        "predicate": pred,
+                        "object": obj,
                         "valid_at": valid_at_str,
                         "invalid_at": invalid_at_str,
                         "episode_run_id": fact.get("episode_run_id"),
@@ -923,8 +1837,12 @@ class GraphitiMemoryEngine:
                             "source": node_id,
                             "target": cat_node_id,
                             "relation": "HAS_FACT",
+                            "edge_type": edge_type,
                             "weight": 0.6,
-                            "color": "#475569"
+                            "color": VisualNotation.CATEGORY_TOKENS.get(cat_key, "var(--color-semantic, #10b981)"),
+                            "valid_at": valid_at_str,
+                            "invalid_at": invalid_at_str,
+                            "bitemporal": True
                         })
 
                     ep_id = fact.get("episode_run_id")
@@ -936,8 +1854,9 @@ class GraphitiMemoryEngine:
                                 "source": run_target,
                                 "target": node_id,
                                 "relation": "GENERATED_FACT",
+                                "edge_type": RDFEdgeTypes.LGP_GENERATED_FACT,
                                 "weight": 0.8,
-                                "color": "#10b981",
+                                "color": VisualNotation.CATEGORY_TOKENS.get("fact_active", "var(--color-fact-active, #10b981)"),
                                 "bitemporal": True,
                                 "valid_at": valid_at_str,
                                 "invalid_at": invalid_at_str
@@ -954,15 +1873,24 @@ class GraphitiMemoryEngine:
                     src = f"agent-{corr['source_subagent']}"
                     tgt = f"agent-{corr['target_subagent']}"
                     if src in node_map and tgt in node_map:
-                        edge_color = "#34d399" if corr["polarity"] == "positive" else ("#f43f5e" if corr["polarity"] == "negative" else "#64748b")
+                        polarity = corr["polarity"]
+                        edge_color = VisualNotation.CATEGORY_TOKENS.get(
+                            "correlation_positive" if polarity == "positive" else ("correlation_negative" if polarity == "negative" else "correlation_neutral"),
+                            "var(--color-corr-positive, #34d399)" if polarity == "positive" else ("var(--color-corr-negative, #f43f5e)" if polarity == "negative" else "var(--color-corr-neutral, #64748b)")
+                        )
                         edges.append({
                             "id": f"corr-{corr['source_subagent']}-{corr['target_subagent']}",
                             "source": src,
                             "target": tgt,
                             "relation": f"NPMI: {corr['npmi_coactivation']:.2f}",
+                            "edge_type": RDFEdgeTypes.SKOS_RELATED,
                             "weight": max(0.5, corr["composite_weight"] * 2),
                             "color": edge_color,
-                            "animated": True
+                            "vowl_edge_style": VisualNotation.EDGE_TYPES.get(RDFEdgeTypes.SKOS_RELATED, {}).get("style", "dashed"),
+                            "animated": True,
+                            "valid_at": datetime.now(timezone.utc).isoformat(),
+                            "invalid_at": None,
+                            "bitemporal": True
                         })
 
             return {

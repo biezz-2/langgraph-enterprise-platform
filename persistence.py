@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, AsyncGenerator
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import (
     BigInteger,
@@ -29,6 +30,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 
 # -----------------------------------------------------------------------------
@@ -144,6 +147,10 @@ class Thread(Base):
 
     thread_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSONVariant, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="idle")
+    values_json: Mapped[Optional[dict[str, Any]]] = mapped_column("values", JSONVariant, nullable=True)
+    interrupts_json: Mapped[Optional[list[dict[str, Any]]]] = mapped_column("interrupts", JSONVariant, nullable=True)
+    extracted_json: Mapped[Optional[dict[str, Any]]] = mapped_column("extracted", JSONVariant, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -156,6 +163,7 @@ class Run(Base):
 
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     thread_id: Mapped[str] = mapped_column(String(64), ForeignKey("threads.thread_id", ondelete="CASCADE"), nullable=False, index=True)
+    assistant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(
         String(32),
         CheckConstraint("status IN ('pending', 'running', 'interrupted', 'completed', 'failed', 'cancelled')", name="ck_run_status"),
@@ -164,12 +172,17 @@ class Run(Base):
         index=True,
     )
     current_subagent: Mapped[Optional[str]] = mapped_column(String(64), ForeignKey("subagent_registry.id", ondelete="SET NULL"), nullable=True, index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSONVariant, nullable=False, default=dict)
+    kwargs: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
+    multitask_strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="enqueue")
     context_packet: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
     budget_allocated: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
     budget_spent: Mapped[dict[str, Any]] = mapped_column(JSONVariant, nullable=False, default=dict)
     checkpoints_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     thread: Mapped["Thread"] = relationship("Thread", back_populates="runs")
     subagent_rel: Mapped[Optional["SubagentRegistry"]] = relationship("SubagentRegistry", back_populates="runs", foreign_keys=[current_subagent])
@@ -525,3 +538,105 @@ class HITLInboxModel(BaseModel):
         if self.approver and self.approver == self.subagent_id:
             raise ValueError("AI tidak dapat menyetujui aksinya sendiri (approver != subagent_id).")
         return self
+
+
+# -----------------------------------------------------------------------------
+# SQLAlchemy Async Engine & Session Factory
+# -----------------------------------------------------------------------------
+
+# Database URL from environment (defaults to SQLite)
+DATABASE_URL = os.environ.get(
+    "LGP_DATABASE_URL",
+    "sqlite+aiosqlite:///data/lgp.db"
+).replace("postgresql://", "postgresql+asyncpg://")
+
+# Create async engine
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=os.environ.get("SQL_ECHO", "false").lower() == "true",
+    poolclass=NullPool if "sqlite" in DATABASE_URL else None,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+)
+
+# Apply SQLite pragmas for SQLite
+if "sqlite" in DATABASE_URL:
+    configure_sqlite_pragmas(engine.sync_engine)
+
+# Async session factory
+async_session_factory = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
+
+
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for FastAPI: provides async database session."""
+    async with async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def init_db() -> None:
+    """Initialize database tables (create all)."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    """Close database engine."""
+    await engine.dispose()
+
+
+# Export all models and utilities
+__all__ = [
+    # Base
+    "Base",
+    "JSONVariant",
+    "BigIntAutoPK",
+    "configure_sqlite_pragmas",
+    # Enums
+    "TrustLevel",
+    "RunStatus",
+    "TelemetryEventType",
+    "PolarityType",
+    "AuditResultStatus",
+    "HITLStatus",
+    # ORM Models
+    "SubagentRegistry",
+    "Thread",
+    "Run",
+    "Checkpoint",
+    "StateDiff",
+    "TelemetryEvent",
+    "CorrelationEdge",
+    "TemporalMemoryFact",
+    "AuditLog",
+    "HITLInbox",
+    # Pydantic Models
+    "SubagentRegistryModel",
+    "ContextPacketModel",
+    "ThreadModel",
+    "RunModel",
+    "CheckpointModel",
+    "StateDiffModel",
+    "TelemetryEventModel",
+    "CorrelationEdgeModel",
+    "TemporalMemoryFactModel",
+    "AuditLogModel",
+    "HITLInboxModel",
+    # Engine & Session
+    "engine",
+    "async_session_factory",
+    "get_async_session",
+    "init_db",
+    "close_db",
+    "DATABASE_URL",
+]

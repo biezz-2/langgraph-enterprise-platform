@@ -1,0 +1,13 @@
+{
+  "board_id": "audit-board-lgp-enterprise-hardening",
+  "type": "AUDIT",
+  "parent": "board-lgp-enterprise-hardening",
+  "phase_ref": null,
+  "owner_agent": "HERMES",
+  "status": "ACTIVE",
+  "title": "Audit findings \u2014 LGP hardening",
+  "cards": [],
+  "coordination": [],
+  "created_at": "2026-10-21T06:03:31.099352+00:00",
+  "updated_at": "2026-10-21T06:03:31.099352+00:00"
+}

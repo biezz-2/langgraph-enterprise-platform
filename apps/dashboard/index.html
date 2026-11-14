@@ -63,11 +63,7 @@
       <button onclick="switchTab('subagents')" id="tab-btn-subagents" class="tab-btn pb-3 text-blue-400 border-b-2 border-blue-500">10 Subagents & Pods</button>
       <button onclick="switchTab('runs')" id="tab-btn-runs" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">Execution Console & Runs</button>
       <button onclick="switchTab('heatmap')" id="tab-btn-heatmap" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">10x10 Correlation Heatmap</button>
-      <button onclick="switchTab('hitl')" id="tab-btn-hitl" class="tab-btn pb-3 text-gray-400 hover:text-gray-200 flex items-center gap-1.5">
-        HITL Inbox
-        <span id="hitl-badge" class="hidden px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-black font-bold">0</span>
-      </button>
-      <button onclick="switchTab('audit')" id="tab-btn-audit" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">Audit Log (Hash Chain)</button>
+      <button onclick="switchTab('neuron')" id="tab-btn-neuron" class="tab-btn pb-3 text-gray-400 hover:text-gray-200">Neuron Graph 2D</button>
     </div>
 
     <!-- TAB 1: 10 Subagents -->
@@ -169,46 +165,64 @@
         </div>
       </div>
     </div>
-
-    <!-- TAB 4: HITL Inbox -->
-    <div id="tab-hitl" class="tab-content hidden space-y-4">
-      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl space-y-4">
-        <h2 class="text-base font-semibold text-white">Human-in-the-Loop (HITL) Inbox</h2>
-        <p class="text-xs text-gray-400">Interupsi kebijakan runtime: Loop detector, effort scaling > 4 subagent, dan otorisasi promote prod.</p>
-        <div id="hitl-list" class="space-y-3">
-          <p class="text-xs text-gray-500 italic">Tidak ada antrean interupsi yang tertunda.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 5: Audit Log -->
-    <div id="tab-audit" class="tab-content hidden space-y-4">
-      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h2 class="text-base font-semibold text-white">Tamper-Evident Audit Log (SHA-256)</h2>
-            <p class="text-xs text-gray-400">Append-only hash chaining menjamin integritas catatan aktivitas platform.</p>
-          </div>
-          <button onclick="loadAuditLogs()" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700">Refresh</button>
-        </div>
-        <div class="overflow-x-auto scrollbar-thin max-h-96">
-          <table class="w-full text-xs text-left">
-            <thead class="text-gray-400 uppercase bg-gray-950 border-b border-gray-800">
-              <tr>
-                <th class="p-2.5">Waktu</th>
-                <th class="p-2.5">Actor</th>
-                <th class="p-2.5">Action</th>
-                <th class="p-2.5">Scope</th>
-                <th class="p-2.5">Curr Hash</th>
-                <th class="p-2.5">Status</th>
-              </tr>
-            </thead>
-            <tbody id="audit-table-body" class="divide-y divide-gray-800"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
   </div>
+
+    <!-- TAB 4: Neuron Graph 2D -->
+    <div id="tab-neuron" class="tab-content hidden space-y-6">
+      <div class="bg-gray-900 border border-gray-800 p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">Neuron Graph 2D — MiroFish Graphiti</h2>
+            <p class="text-xs text-gray-400 mt-0.5">Visualisasi interaktif knowledge graph bi-temporal (Cytoscape.js)</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="neuron-layout" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-sm text-gray-100 focus:outline-none focus:border-blue-500">
+              <option value="cose">CoSE (Compound Spring Embedder)</option>
+              <option value="cose-bilkent">CoSE-Bilkent (Hierarchical)</option>
+              <option value="dagre">Dagre (Directed Acyclic Graph)</option>
+              <option value="klay">KLAY (Layered)</option>
+              <option value="cola">Cola.js (Force-directed)</option>
+              <option value="fcose">fCoSE (Fast CoSE)</option>
+            </select>
+            <button onclick="loadNeuronGraph()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded-lg transition">Refresh</button>
+            <button onclick="exportNeuronGraph('cytoscape')" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg transition">Export JSON</button>
+            <button onclick="exportNeuronGraph('dot')" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded-lg transition">Export DOT</button>
+            <button onclick="exportNeuronGraph('graphml')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded-lg transition">Export GraphML</button>
+          </div>
+        </div>
+        <div class="relative h-[600px] bg-gray-950 rounded-lg border border-gray-800">
+          <div id="cy" class="w-full h-full"></div>
+          <div id="neuron-loading" class="absolute inset-0 flex items-center justify-center bg-gray-950/90 z-10">
+            <div class="text-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+              <p class="text-gray-400">Memuat neuron graph...</p>
+            </div>
+          </div>
+          <div id="neuron-error" class="absolute inset-0 flex items-center justify-center bg-gray-950/90 z-10 hidden">
+            <p class="text-rose-400 text-center p-4">Gagal memuat graph. Cek konsol untuk detail.</p>
+          </div>
+        </div>
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+          <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg">
+            <p class="text-gray-400">Total Nodes</p>
+            <p id="neuron-stats-nodes" class="text-xl font-bold text-white">—</p>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg">
+            <p class="text-gray-400">Total Edges</p>
+            <p id="neuron-stats-edges" class="text-xl font-bold text-white">—</p>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg">
+            <p class="text-gray-400">Layout</p>
+            <p id="neuron-stats-layout" class="text-xl font-bold text-white">—</p>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg">
+            <p class="text-gray-400">Kategori</p>
+            <p id="neuron-stats-cats" class="text-xl font-bold text-white">—</p>
+          </div>
+        </div>
+        <div id="neuron-legend" class="mt-4 flex flex-wrap gap-4 text-xs text-gray-300"></div>
+      </div>
+    </div>
 
   <footer class="border-t border-gray-900 py-4 text-center text-xs text-gray-500">
     Enterprise LangGraph Platform (LGP v2.0) • Monitored by PM2 Process Manager
@@ -227,8 +241,7 @@
       document.getElementById('tab-' + tabId).classList.remove('hidden');
 
       if (tabId === 'heatmap') loadHeatmap();
-      if (tabId === 'hitl') loadHitl();
-      if (tabId === 'audit') loadAuditLogs();
+      if (tabId === 'neuron') loadNeuronGraph();
     }
 
     async function loadSubagents() {
@@ -361,98 +374,291 @@
       }
     }
 
-    async function loadHitl() {
-      try {
-        const res = await fetch('/api/hitl/inbox');
-        const list = await res.json();
-        const container = document.getElementById('hitl-list');
-        const badge = document.getElementById('hitl-badge');
-
-        const pending = list.filter(item => item.status === 'pending');
-        if (pending.length > 0) {
-          badge.innerText = pending.length;
-          badge.classList.remove('hidden');
-        } else {
-          badge.classList.add('hidden');
-        }
-
-        if (list.length === 0) {
-          container.innerHTML = '<p class="text-xs text-gray-500 italic">Tidak ada interupsi dalam inbox.</p>';
-          return;
-        }
-
-        container.innerHTML = '';
-        list.forEach(item => {
-          const div = document.createElement('div');
-          div.className = "bg-gray-950 border border-gray-800 p-4 rounded-lg flex items-center justify-between";
-          div.innerHTML = `
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs px-2 py-0.5 rounded font-mono ${item.status === 'pending' ? 'bg-amber-500/20 text-amber-400' : 'bg-gray-800 text-gray-400'}">${item.status.toUpperCase()}</span>
-                <span class="text-xs text-gray-400 font-mono">Run: ${item.run_id}</span>
-              </div>
-              <p class="text-sm font-semibold text-white mt-1">${item.reason}</p>
-              <p class="text-xs text-gray-500">Subagent: ${item.subagent_id} • Approver: ${item.approver || '-'}</p>
-            </div>
-            ${item.status === 'pending' ? `
-              <div class="flex gap-2">
-                <button onclick="resolveHitl('${item.interrupt_id}', 'approved')" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded">Approve</button>
-                <button onclick="resolveHitl('${item.interrupt_id}', 'rejected')" class="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded">Reject</button>
-              </div>
-            ` : ''}
-          `;
-          container.appendChild(div);
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    async function resolveHitl(interrupt_id, decision) {
-      const approver = prompt("Masukkan nama/ID approver manusia:", "Operator-1");
-      if (!approver) return;
-
-      try {
-        const res = await fetch('/api/hitl/resolve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ interrupt_id, approver, decision })
-        });
-        const data = await res.json();
-        if (data.error) alert(data.error);
-        loadHitl();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-
-    async function loadAuditLogs() {
-      try {
-        const res = await fetch('/api/audit');
-        const data = await res.json();
-        const tbody = document.getElementById('audit-table-body');
-        tbody.innerHTML = '';
-
-        data.forEach(log => {
-          const tr = document.createElement('tr');
-          const timeStr = new Date(log.created_at * 1000).toLocaleTimeString();
-          tr.innerHTML = `
-            <td class="p-2.5 font-mono text-gray-400">${timeStr}</td>
-            <td class="p-2.5 font-bold text-gray-200">${log.actor}</td>
-            <td class="p-2.5 font-mono text-blue-400">${log.action}</td>
-            <td class="p-2.5 text-gray-400">${log.scope}</td>
-            <td class="p-2.5 font-mono text-[10px] text-gray-500">${log.curr_hash.substring(0, 16)}...</td>
-            <td class="p-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400">${log.result_status}</span></td>
-          `;
-          tbody.appendChild(tr);
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
     // Initial load
     loadSubagents();
+
+    // ===== NEURON GRAPH 2D (Cytoscape.js) =====
+    let cy = null;
+    const CATEGORY_COLORS = {
+      'semantic': '#10b981',       // emerald - knowledge facts
+      'episodic': '#3b82f6',       // blue - runs/episodes
+      'procedural': '#0ea5e9',     // sky - subagents/processes
+      'working': '#f59e0b',        // amber - working memory
+      'meta': '#a855f7',           // purple - meta/guard policies
+    };
+    const CATEGORY_LABELS = {
+      'semantic': '📚 Semantic',
+      'episodic': '🎬 Episodic',
+      'procedural': '⚙️ Procedural',
+      'working': '🧠 Working',
+      'meta': '🛡️ Meta',
+    };
+    const EDGE_TYPE_STYLES = {
+      // LGP Custom predicates
+      'lgp:hasCapability': { color: '#0ea5e9', width: 2, lineStyle: 'solid' },
+      'lgp:npmicorrelation': { color: '#eab308', width: 1.5, lineStyle: 'dashed' },
+      'lgp:isEpisode': { color: '#3b82f6', width: 1.5, lineStyle: 'solid' },
+      'lgp:executed': { color: '#a855f7', width: 2, lineStyle: 'solid' },
+      'lgp:hasFact': { color: '#10b981', width: 2, lineStyle: 'solid' },
+      'lgp:generatedFact': { color: '#22c55e', width: 1.5, lineStyle: 'dotted' },
+      'lgp:relatesTo': { color: '#06b6d4', width: 1.5, lineStyle: 'dashed' },
+      'lgp:partOf': { color: '#a855f7', width: 1.5, lineStyle: 'dotted' },
+      'lgp:representation': { color: '#ec4899', width: 2, lineStyle: 'solid' },
+      'lgp:mentions': { color: '#60a5fa', width: 1, lineStyle: 'dashed' },
+      // RDF/OWL Standard predicates
+      'rdf:type': { color: '#64748b', width: 1.5, lineStyle: 'solid' },
+      'rdfs:subClassOf': { color: '#3b82f6', width: 2, lineStyle: 'solid' },
+      'rdfs:label': { color: '#94a3b8', width: 1, lineStyle: 'dashed' },
+      'prov:wasGeneratedBy': { color: '#22c55e', width: 2, lineStyle: 'solid' },
+      'dcterms:isPartOf': { color: '#a855f7', width: 1.5, lineStyle: 'dotted' },
+      'skos:broader': { color: '#f59e0b', width: 2, lineStyle: 'solid' },
+      'skos:narrower': { color: '#f97316', width: 1.5, lineStyle: 'dotted' },
+      'skos:related': { color: '#eab308', width: 1, lineStyle: 'dashed' },
+      'owl:sameAs': { color: '#ec4899', width: 1, lineStyle: 'solid' },
+      'owl:ObjectProperty': { color: '#14b8a6', width: 2, lineStyle: 'solid' },
+      'owl:DatatypeProperty': { color: '#06b6d4', width: 1.5, lineStyle: 'dashed' },
+    };
+
+    async function loadNeuronGraph() {
+      const loadingEl = document.getElementById('neuron-loading');
+      const errorEl = document.getElementById('neuron-error');
+      const cyContainer = document.getElementById('cy');
+
+      loadingEl.classList.remove('hidden');
+      errorEl.classList.add('hidden');
+      cyContainer.innerHTML = '';
+
+      try {
+        // Load Cytoscape.js if not loaded
+        if (typeof cytoscape === 'undefined') {
+          await loadScript('https://unpkg.com/cytoscape@3.30.0/dist/cytoscape.min.js');
+          await loadScript('https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.min.js');
+          await loadScript('https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js');
+          await loadScript('https://unpkg.com/klayjs@0.12.2/dist/klay.min.js');
+          await loadScript('https://unpkg.com/cytoscape-klay@1.1.0/cytoscape-klay.min.js');
+          await loadScript('https://unpkg.com/cola.js@4.0.4/dist/cola.min.js');
+          await loadScript('https://unpkg.com/cytoscape-cola@2.5.0/cytoscape-cola.min.js');
+          await loadScript('https://unpkg.com/cytoscape-fcose@1.5.0/cytoscape-fcose.min.js');
+        }
+
+        // Fetch graph data from API
+        const res = await fetch('/api/graph/graphiti');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const graphData = await res.json();
+
+        // Build Cytoscape elements
+        const elements = [];
+        const categories = new Set();
+
+        // Add nodes
+        if (graphData.nodes) {
+          graphData.nodes.forEach(node => {
+            const cat = node.category || 'unknown';
+            categories.add(cat);
+            elements.push({
+              data: {
+                id: node.id,
+                label: node.label || node.id,
+                category: cat,
+                vowl_shape: node.vowl_shape || 'ellipse',
+                valid_at: node.valid_at,
+                invalid_at: node.invalid_at,
+                ...node
+              },
+              classes: cat
+            });
+          });
+        }
+
+        // Add edges
+        if (graphData.edges) {
+          graphData.edges.forEach(edge => {
+            const edgeType = edge.edge_type || edge.type || 'unknown';
+            const style = EDGE_TYPE_STYLES[edgeType] || EDGE_TYPE_STYLES['rdf:type'];
+            elements.push({
+              data: {
+                id: edge.id || `${edge.source}-${edge.target}`,
+                source: edge.source,
+                target: edge.target,
+                label: edge.label || edge.relation || edgeType,
+                edge_type: edgeType,
+                relation: edge.relation,
+                bitemporal: edge.bitemporal,
+                detail: edge.detail,
+                valid_at: edge.valid_at,
+                invalid_at: edge.invalid_at,
+                ...style
+              },
+              classes: 'edge'
+            });
+          });
+        }
+
+        // Initialize Cytoscape
+        const layoutName = document.getElementById('neuron-layout').value;
+        cy = cytoscape({
+          container: cyContainer,
+          elements: elements,
+          style: buildStylesheet(),
+          layout: { name: layoutName, animate: true, fit: true },
+          minZoom: 0.1,
+          maxZoom: 4,
+          wheelSensitivity: 0.3,
+          boxSelectionEnabled: true,
+          autoungrabify: false
+        });
+
+        // Event handlers
+        cy.on('tap', 'node', function(evt) {
+          const n = evt.target;
+          showNodeDetails(n.data());
+        });
+
+        cy.on('tap', 'edge', function(evt) {
+          const e = evt.target;
+          showEdgeDetails(e.data());
+        });
+
+        // Fit and update stats
+        cy.fit();
+        updateNeuronStats(graphData);
+        buildLegend();
+
+        loadingEl.classList.add('hidden');
+
+      } catch (err) {
+        console.error('Neuron graph load error:', err);
+        loadingEl.classList.add('hidden');
+        errorEl.classList.remove('hidden');
+      }
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${url}"]`)) { resolve(); return; }
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+
+    function buildStylesheet() {
+      const styles = [
+        { selector: 'node', style: { 'label': 'data(label)', 'font-size': '10px', 'text-valign': 'center', 'text-halign': 'center', 'color': '#e5e7eb', 'text-outline-width': 2, 'text-outline-color': '#000', 'width': 'mapData(degree, 0, 50, 20, 60)', 'height': 'mapData(degree, 0, 50, 20, 60)', 'background-color': 'data(categoryColor)', 'border-width': 1, 'border-color': '#374151', 'overlay-padding': '6px', 'z-index': 10 } },
+        { selector: 'node.semantic', style: { 'background-color': '#10b981', 'shape': 'roundrectangle' } },
+        { selector: 'node.episodic', style: { 'background-color': '#3b82f6', 'shape': 'rectangle' } },
+        { selector: 'node.procedural', style: { 'background-color': '#0ea5e9', 'shape': 'ellipse' } },
+        { selector: 'node.working', style: { 'background-color': '#f59e0b', 'shape': 'ellipse' } },
+        { selector: 'node.meta', style: { 'background-color': '#a855f7', 'shape': 'ellipse' } },
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#0ea5e9', 'overlay-color': '#0ea5e9', 'overlay-opacity': 0.3 } },
+        { selector: 'edge', style: { 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'line-color': 'data(color)', 'width': 'data(width)', 'line-style': 'data(lineStyle)', 'font-size': '9px', 'label': 'data(label)', 'color': '#9ca3af', 'text-background-color': '#0f172a', 'text-background-opacity': 0.8, 'text-background-padding': '2px', 'text-background-shape': 'roundrectangle', 'z-index': 1 } },
+        { selector: 'edge:selected', style: { 'width': 'data(width)', 'line-color': '#0ea5e9', 'target-arrow-color': '#0ea5e9', 'color': '#0ea5e9' } }
+      ];
+      return styles;
+    }
+
+    function updateNeuronStats(graphData) {
+      const nodeCount = graphData.nodes ? graphData.nodes.length : 0;
+      const edgeCount = graphData.edges ? graphData.edges.length : 0;
+      const cats = new Set();
+      if (graphData.nodes) graphData.nodes.forEach(n => cats.add(n.category || 'unknown'));
+
+      document.getElementById('neuron-stats-nodes').innerText = nodeCount.toLocaleString();
+      document.getElementById('neuron-stats-edges').innerText = edgeCount.toLocaleString();
+      document.getElementById('neuron-stats-layout').innerText = document.getElementById('neuron-layout').value;
+      document.getElementById('neuron-stats-cats').innerText = cats.size;
+    }
+
+    function buildLegend() {
+      const legend = document.getElementById('neuron-legend');
+      if (!legend) return;
+      legend.innerHTML = '';
+      const seen = new Set();
+      if (cy) {
+        cy.nodes().forEach(n => {
+          const cat = n.data('category');
+          if (!seen.has(cat)) {
+            seen.add(cat);
+            const color = CATEGORY_COLORS[cat] || '#64748b';
+            const label = CATEGORY_LABELS[cat] || cat;
+            const span = document.createElement('span');
+            span.innerHTML = `<span class="inline-block w-3 h-3 rounded mr-1" style="background:${color}"></span>${label}`;
+            legend.appendChild(span);
+          }
+        });
+      }
+    }
+
+    function showNodeDetails(data) {
+      console.log('Node clicked:', data);
+      // Could show a modal/sidebar with details
+    }
+
+    function showEdgeDetails(data) {
+      console.log('Edge clicked:', data);
+    }
+
+    function exportNeuronGraph(format) {
+      if (!cy) return alert('Graph belum dimuat');
+
+      if (format === 'cytoscape') {
+        const json = cy.json();
+        downloadJSON(json, 'neuron-graph-cytoscape.json');
+      } else if (format === 'dot') {
+        // Convert to DOT format
+        let dot = 'digraph NeuronGraph {\n  rankdir=LR;\n  node [fontname="Arial"];\n';
+        cy.nodes().forEach(n => {
+          const d = n.data();
+          dot += `  "${d.id}" [label="${d.label}", shape=${getDotShape(d.vowl_shape)}];\n`;
+        });
+        cy.edges().forEach(e => {
+          const d = e.data();
+          dot += `  "${d.source}" -> "${d.target}" [label="${d.label || d.edge_type}"];\n`;
+        });
+        dot += '}';
+        downloadText(dot, 'neuron-graph.dot');
+      } else if (format === 'graphml') {
+        // Convert to GraphML
+        let gml = `<?xml version="1.0" encoding="UTF-8"?>\n<graphml xmlns="http://graphml.graphdrawing.org/xmlns">\n  <key id="label" for="node" attr.name="label" attr.type="string"/>\n  <key id="category" for="node" attr.name="category" attr.type="string"/>\n  <key id="edge_type" for="edge" attr.name="edge_type" attr.type="string"/>\n  <graph id="NeuronGraph" edgedefault="directed">\n`;
+        cy.nodes().forEach(n => {
+          const d = n.data();
+          gml += `    <node id="${d.id}">\n      <data key="label">${escapeXml(d.label)}</data>\n      <data key="category">${escapeXml(d.category || '')}</data>\n    </node>\n`;
+        });
+        cy.edges().forEach(e => {
+          const d = e.data();
+          gml += `    <edge source="${d.source}" target="${d.target}">\n      <data key="edge_type">${escapeXml(d.edge_type || '')}</data>\n    </edge>\n`;
+        });
+        gml += '  </graph>\n</graphml>';
+        downloadText(gml, 'neuron-graph.graphml');
+      }
+    }
+
+    function getDotShape(vowlShape) {
+      const map = { 'ellipse': 'ellipse', 'rectangle': 'box', 'roundrectangle': 'box', 'triangle': 'triangle', 'diamond': 'diamond', 'hexagon': 'hexagon', 'octagon': 'octagon' };
+      return map[vowlShape] || 'ellipse';
+    }
+
+    function escapeXml(str) {
+      return String(str).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+    }
+
+    function downloadJSON(obj, filename) {
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadText(text, filename) {
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
   </script>
 </body>
 </html>

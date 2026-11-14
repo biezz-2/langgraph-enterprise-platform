@@ -1,0 +1,28 @@
+{
+  "board_id": "phase-board-lgp-enterprise-hardening-p05",
+  "type": "PHASE",
+  "parent": "lgp-enterprise-hardening",
+  "phase_ref": "p05",
+  "owner_agent": "HERMES",
+  "status": "ACTIVE",
+  "title": "Rate limit + audit + security headers",
+  "cards": [
+    {
+      "card_id": "c-phase-board-lgp-enterprise-hardening-p05-01",
+      "title": "Rate limit + audit + security headers",
+      "status": "BACKLOG",
+      "severity": null,
+      "finding_ref": null,
+      "assignee": "HERMES",
+      "notes": "Risk driving this phase: MEDIUM: no rate limiting anywhere"
+    }
+  ],
+  "coordination": [
+    {
+      "edge": "VALIDATES",
+      "board_id": "validation-board-lgp-enterprise-hardening-p05"
+    }
+  ],
+  "created_at": "2026-10-21T06:03:31.099352+00:00",
+  "updated_at": "2026-10-21T06:03:31.099352+00:00"
+}
