@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, AsyncGenerator, Optional
 from contextlib import asynccontextmanager
 from enum import Enum
@@ -835,7 +835,7 @@ async def create_run(
             "kwargs": run.kwargs,
             "after_seconds": run.after_seconds,
         },
-        scheduled_at=datetime.now(timezone.utc) + asyncio.sleep(run.after_seconds) if run.after_seconds else None,
+        scheduled_at=datetime.now(timezone.utc) + timedelta(seconds=run.after_seconds) if run.after_seconds else None,
     )
 
     await db.flush()

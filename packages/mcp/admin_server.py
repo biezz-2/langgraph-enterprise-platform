@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 import hashlib
 from typing import Dict, List, Any, Optional
 import httpx
@@ -544,8 +545,17 @@ class AdminMCPServer:
         return CorrelationCalculator()
 
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any], actor: str = "AdminMCPClient") -> Dict[str, Any]:
-        await record_audit_log(actor, f"mcp.tool_call:{tool_name}", "mcp:admin", arguments, "success")
+        """Wrapper: audit log dengan status AKTUAL setelah eksekusi tool."""
+        try:
+            result = await self._dispatch_tool(tool_name, arguments, actor)
+        except Exception:
+            await record_audit_log(actor, f"mcp.tool_call:{tool_name}", "mcp:admin", arguments, "error")
+            raise
+        status = "error" if isinstance(result, dict) and result.get("error") else "success"
+        await record_audit_log(actor, f"mcp.tool_call:{tool_name}", "mcp:admin", arguments, status)
+        return result
 
+    async def _dispatch_tool(self, tool_name: str, arguments: Dict[str, Any], actor: str = "AdminMCPClient") -> Dict[str, Any]:
         if tool_name == "lgp_subagent_list":
             pod_filter = arguments.get("pod")
             db = await get_db_connection()
@@ -597,8 +607,14 @@ class AdminMCPServer:
                     if "max_tokens" in arguments and arguments["max_tokens"] is not None:
                         budget_config["max_tokens"] = int(arguments["max_tokens"])
 
-                    trust_level = arguments.get("trust_level", row["trust_level"])
-                    is_active = 1 if arguments.get("is_active", row["is_active"] == 1) else 0
+                    trust_level = arguments.get("trust_level")
+                    if trust_level is None:
+                        trust_level = row["trust_level"]
+                    is_active_arg = arguments.get("is_active")
+                    if is_active_arg is None:
+                        is_active = 1 if row["is_active"] == 1 else 0
+                    else:
+                        is_active = 1 if is_active_arg else 0
 
                     await db.execute("""
                         UPDATE subagent_registry
@@ -637,7 +653,7 @@ class AdminMCPServer:
         elif tool_name == "lgp_run_create":
             objective = arguments.get("objective", "")
             subagents = arguments.get("subagents")
-            thread_id = f"th-{time.strftime('%Y%m%d%H%M%S')}"
+            thread_id = f"th-{uuid.uuid4().hex[:16]}"
             result = await self.orchestrator.execute_run(thread_id, objective, subagents)
             GlobalEventBus.get_instance().publish_sync("run_updated", {"run_id": result.get("run_id"), "status": result.get("status")})
             return result
@@ -679,6 +695,8 @@ class AdminMCPServer:
             interrupt_id = arguments.get("interrupt_id", "")
             approver = arguments.get("approver", "")
             decision = arguments.get("decision", "rejected")
+            if decision not in ("approved", "rejected"):
+                return {"error": f"Decision '{decision}' tidak valid. Gunakan 'approved' atau 'rejected'."}
 
             db = await get_db_connection()
             try:
@@ -686,10 +704,14 @@ class AdminMCPServer:
                     row = await cursor.fetchone()
                     if not row:
                         return {"error": f"Interrupt '{interrupt_id}' tidak ditemukan"}
+                    if row["status"] != "pending":
+                        return {"error": f"Interrupt '{interrupt_id}' sudah berstatus '{row['status']}' (bukan pending)."}
 
                     # Rule: Anti-self-approval
                     if approver == row["subagent_id"]:
                         return {"error": "Pelanggaran Keamanan: AI tidak diizinkan menyetujui aksinya sendiri!"}
+
+                    run_id = row["run_id"]
 
                 now = time.time()
                 await db.execute("""
@@ -698,10 +720,35 @@ class AdminMCPServer:
                     WHERE interrupt_id = ?
                 """, (decision, approver, decision, now, interrupt_id))
                 await db.commit()
-                GlobalEventBus.get_instance().publish_sync("hitl_updated", {"interrupt_id": interrupt_id, "approver": approver, "decision": decision})
-                return {"status": "success", "interrupt_id": interrupt_id, "decision": decision}
             finally:
                 await db.close()
+
+            # Resume the interrupted LangGraph run with the human decision
+            resume_result = None
+            try:
+                db2 = await get_db_connection()
+                try:
+                    async with db2.execute("SELECT thread_id FROM runs WHERE run_id = ?", (run_id,)) as cursor:
+                        run_row = await cursor.fetchone()
+                finally:
+                    await db2.close()
+                if run_row and run_row["thread_id"]:
+                    resume_result = await self.orchestrator.resume_run(
+                        run_row["thread_id"],
+                        {"interrupt_id": interrupt_id, "approver": approver, "decision": decision},
+                        run_id=run_id,
+                    )
+            except Exception as e:
+                resume_result = {"resume_error": str(e)}
+
+            GlobalEventBus.get_instance().publish_sync("hitl_updated", {"interrupt_id": interrupt_id, "approver": approver, "decision": decision})
+            return {
+                "status": "success",
+                "interrupt_id": interrupt_id,
+                "decision": decision,
+                "run_resumed": resume_result is not None and "resume_error" not in (resume_result or {}),
+                "resume_result": resume_result,
+            }
 
         elif tool_name in ["lgp_memory_query", "memory_recall"]:
             subject = arguments.get("subject") or arguments.get("query")
@@ -770,6 +817,9 @@ class AdminMCPServer:
             now = time.time()
             db = await get_db_connection()
             try:
+                async with db.execute("SELECT fact_id FROM temporal_facts WHERE fact_id = ?", (fact_id,)) as cursor:
+                    if not await cursor.fetchone():
+                        return {"error": f"Fact '{fact_id}' tidak ditemukan"}
                 await db.execute("UPDATE temporal_facts SET invalid_at = ? WHERE fact_id = ?", (now, fact_id))
                 await db.commit()
                 GlobalEventBus.get_instance().publish_sync("memory_updated", {
@@ -793,10 +843,13 @@ class AdminMCPServer:
                 await db.close()
 
         elif tool_name == "lgp_correlation_setup":
-            alpha = float(arguments.get("alpha", 0.4))
-            beta = float(arguments.get("beta", 0.4))
-            gamma = float(arguments.get("gamma", 0.2))
-            n_min = int(arguments.get("n_min", 50))
+            def _f(key, default):
+                v = arguments.get(key, default)
+                return default if v is None else float(v)
+            alpha = _f("alpha", 0.4)
+            beta = _f("beta", 0.4)
+            gamma = _f("gamma", 0.2)
+            n_min = int(arguments.get("n_min") or 50)
             now = time.time()
 
             db = await get_db_connection()
@@ -914,7 +967,7 @@ class AdminMCPServer:
             status_filter = arguments.get("status", "pending")
             db = await get_db_connection()
             try:
-                if status_filter == "all":
+                if not status_filter or status_filter == "all":
                     query = "SELECT * FROM hitl_inbox ORDER BY created_at DESC"
                     params = ()
                 else:
@@ -1018,18 +1071,19 @@ class AdminMCPServer:
             
             db = await get_db_connection()
             try:
-                board_id = f"board-{int(time.time() * 1000)}"
+                board_id = f"board-{uuid.uuid4().hex[:12]}"
                 now = time.time()
                 await db.execute(
                     "INSERT INTO kanban_boards (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
                     (board_id, name, now, now)
                 )
-                
+
                 for i, col in enumerate(columns):
-                    col_id = f"col-{int(time.time() * 1000)}-{i}"
+                    col_name = col.get("name", "") if isinstance(col, dict) else str(col)
+                    col_id = f"col-{uuid.uuid4().hex[:12]}-{i}"
                     await db.execute(
                         "INSERT INTO kanban_columns (id, board_id, name, order_idx) VALUES (?, ?, ?, ?)",
-                        (col_id, board_id, col.get("name", ""), i)
+                        (col_id, board_id, col_name, i)
                     )
                 
                 await db.commit()
@@ -1055,7 +1109,7 @@ class AdminMCPServer:
                         return {"error": f"Column '{column_name}' tidak ditemukan di board '{board_id}'"}
                     column_id = col_row["id"]
                 
-                card_id = f"card-{int(time.time() * 1000)}"
+                card_id = f"card-{uuid.uuid4().hex[:12]}"
                 now = time.time()
                 await db.execute(
                     "INSERT INTO kanban_cards (id, column_id, title, description, priority, assigned_to, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

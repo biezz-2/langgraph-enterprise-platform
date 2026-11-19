@@ -11,7 +11,6 @@ import {
   UserCheck,
   Database,
   Network,
-  LayoutGrid,
   ShieldAlert,
   FileCode2,
   Menu,
@@ -24,7 +23,8 @@ import {
   Radio,
   ExternalLink,
 } from "lucide-react"
-import { FALLBACK_HEALTH, FALLBACK_HITL_INBOX } from "@/lib/mockData"
+import { FALLBACK_HEALTH } from "@/lib/mockData"
+import { onLiveEvent, emitLiveEvent } from "@/lib/liveEvents"
 import type { SystemHealth } from "@/types"
 
 export interface NavItem {
@@ -44,7 +44,6 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "hitl", label: "HITL Inbox", href: "/hitl", icon: UserCheck, badge: 3, badgeColor: "bg-amber-500/20 text-amber-300 border-amber-500/30" },
   { id: "memory", label: "Bi-Temporal Memory", href: "/memory", icon: Database },
   { id: "matrix", label: "Correlation Matrix", href: "/matrix", icon: Network, badge: "NPMI" },
-  { id: "kanban", label: "Phase-Gate Kanban", href: "/kanban", icon: LayoutGrid, badge: "AGENTS" },
   { id: "guardrails", label: "Guardrails & Telemetry", href: "/guardrails", icon: ShieldAlert, badge: "OWASP" },
   { id: "api-docs", label: "API & FastMCP Explorer", href: "/api-docs", icon: FileCode2 },
 ]
@@ -65,7 +64,7 @@ export default function DashboardShell({
   const [health, setHealth] = useState<SystemHealth>(FALLBACK_HEALTH)
   const [backendOnline, setBackendOnline] = useState<boolean>(false)
   const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "offline">("offline")
-  const [pendingHITLCount, setPendingHITLCount] = useState<number>(3)
+  const [pendingHITLCount, setPendingHITLCount] = useState<number>(0)
   const wsRef = useRef<WebSocket | null>(null)
 
   const checkHealth = useCallback(async () => {
@@ -102,6 +101,20 @@ export default function DashboardShell({
         setWsStatus("connected")
         setBackendOnline(true)
       }
+      ws.onmessage = (msg) => {
+        try {
+          const payload = JSON.parse(msg.data)
+          if (payload?.type === "platform_event") {
+            emitLiveEvent({
+              event: payload.event || "update",
+              data: payload.data || {},
+              timestamp: payload.timestamp,
+            })
+          }
+        } catch {
+          // non-JSON frames (heartbeat etc.) are ignored
+        }
+      }
       ws.onerror = () => {
         setWsStatus("offline")
       }
@@ -113,15 +126,37 @@ export default function DashboardShell({
     }
   }, [])
 
+  const refreshHITLCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/hitl")
+      if (res.ok) {
+        const data = await res.json()
+        const items = Array.isArray(data) ? data : data?.items || []
+        setPendingHITLCount(items.filter((i: { status?: string }) => i.status === "pending").length)
+      }
+    } catch {}
+  }, [])
+
   useEffect(() => {
     checkHealth()
     connectWS()
-    const interval = setInterval(checkHealth, 30000)
+    refreshHITLCount()
+    const interval = setInterval(() => {
+      checkHealth()
+      refreshHITLCount()
+    }, 30000)
+    // Realtime: refresh HITL badge on platform events
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "hitl_updated" || evt.event === "run_updated") {
+        refreshHITLCount()
+      }
+    })
     return () => {
       clearInterval(interval)
+      unsub()
       wsRef.current?.close()
     }
-  }, [checkHealth, connectWS])
+  }, [checkHealth, connectWS, refreshHITLCount])
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-indigo-500/30 selection:text-indigo-200">

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -316,28 +317,37 @@ async def sync_hermes_memory_to_lgp(db: Any) -> Dict[str, Any]:
     synced_facts = 0
     now_ts = time.time()
 
-    if lessons_file.exists():
+    async def _sync_items(file_path: Path, subject: str, predicate: str) -> None:
+        nonlocal synced_facts
+        if not file_path.exists():
+            return
         try:
-            with open(lessons_file, "r", encoding="utf-8") as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                lessons = data.get("lessons", [])
-                for lesson in lessons:
-                    fact_id = f"fact-lesson-{int(now_ts*1000)}"
-                    content = lesson if isinstance(lesson, str) else json.dumps(lesson)
-                    # Check if exists
-                    async with db.execute(
-                        "SELECT id FROM temporal_facts WHERE fact_text = ?", (content,)
-                    ) as cur:
-                        if not await cur.fetchone():
-                            await db.execute(
-                                """INSERT INTO temporal_facts 
-                                   (id, fact_text, domain, confidence, valid_from, created_at, status)
-                                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                                (fact_id, content, "lesson", 0.95, now_ts, now_ts, "active"),
-                            )
-                            synced_facts += 1
+            items = data.get("lessons", data.get("decisions", [])) if isinstance(data, dict) else data
+            if not isinstance(items, list):
+                return
+            for item in items:
+                content = item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
+                fact_id = f"fact-{subject}-{uuid.uuid4().hex[:12]}"
+                async with db.execute(
+                    "SELECT fact_id FROM temporal_facts WHERE subject = ? AND predicate = ? AND object = ?",
+                    (subject, predicate, content),
+                ) as cur:
+                    if await cur.fetchone():
+                        continue
+                await db.execute(
+                    """INSERT INTO temporal_facts
+                       (fact_id, subject, predicate, object, valid_at, created_at, pii_redacted)
+                       VALUES (?, ?, ?, ?, ?, ?, 0)""",
+                    (fact_id, subject, predicate, content, now_ts, now_ts),
+                )
+                synced_facts += 1
         except Exception as e:
-            logger.warning("Failed syncing lessons: %s", e)
+            logger.warning("Failed syncing %s: %s", file_path.name, e)
+
+    await _sync_items(lessons_file, "lesson", "learned")
+    await _sync_items(decisions_file, "decision", "decided")
 
     await db.commit()
     return {"synced_facts": synced_facts}

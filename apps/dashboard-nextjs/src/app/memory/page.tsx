@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import { FALLBACK_MEMORY_FACTS } from "@/lib/mockData"
 import type { MemoryFact } from "@/types"
 import {
@@ -36,22 +37,27 @@ export default function MemoryPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  useEffect(() => {
-    async function fetchMemory() {
-      try {
-        const res = await fetch("/api/memory")
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data) && data.length > 0) {
-            setFacts(data)
-          }
+  const fetchMemory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/memory")
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) {
+          setFacts(data)
         }
-      } catch {
-        // Fallback active
       }
+    } catch {
+      // Fallback active
     }
-    fetchMemory()
   }, [])
+
+  useEffect(() => {
+    fetchMemory()
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "memory_updated") fetchMemory()
+    })
+    return unsub
+  }, [fetchMemory])
 
   const filteredFacts = facts.filter((f) => {
     if (!searchQuery.trim()) return true
@@ -64,52 +70,66 @@ export default function MemoryPage() {
     )
   })
 
-  const handleAddFact = (e: React.FormEvent) => {
+  const handleAddFact = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newSubject.trim() || !newPredicate.trim() || !newObject.trim()) return
 
-    const newFact: MemoryFact = {
-      fact_id: `fact-${Date.now().toString(36)}`,
-      subject: newSubject.trim(),
-      predicate: newPredicate.trim(),
-      object: newObject.trim(),
-      valid_at: Date.now(),
-      invalid_at: null,
-      created_at: Date.now(),
-      episode_run_id: "manual-entry",
-      pii_redacted: false,
-      similarity: 0.95,
+    try {
+      const res = await fetch("/mcp/admin/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool: "memory_store",
+          arguments: {
+            subject: newSubject.trim(),
+            predicate: newPredicate.trim(),
+            object: newObject.trim(),
+          },
+          actor: "dashboard",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (data?.error) {
+        showToast(`Gagal: ${data.error}`)
+        return
+      }
+      setAddFactModal(false)
+      setNewSubject("")
+      setNewPredicate("")
+      setNewObject("")
+      showToast(`Fakta memori ${data?.fact?.fact_id || ""} berhasil disimpan ke temporal store`)
+      fetchMemory()
+    } catch {
+      showToast("Gagal menghubungi backend API")
     }
-
-    setFacts([newFact, ...facts])
-    setAddFactModal(false)
-    setNewSubject("")
-    setNewPredicate("")
-    setNewObject("")
-    showToast(`Fakta memori ${newFact.fact_id} berhasil ditambahkan ke SQLite WAL store`)
   }
 
-  const handleIngestEpisode = (e: React.FormEvent) => {
+  const handleIngestEpisode = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!episodeText.trim()) return
 
-    const simulatedFact: MemoryFact = {
-      fact_id: `fact-ep-${Date.now().toString(36)}`,
-      subject: "Episode:Ingested",
-      predicate: "synthesized_knowledge",
-      object: episodeText.slice(0, 120) + (episodeText.length > 120 ? "..." : ""),
-      valid_at: Date.now(),
-      invalid_at: null,
-      created_at: Date.now(),
-      episode_run_id: `run-ep-${Date.now().toString(36)}`,
-      pii_redacted: true,
-      similarity: 0.98,
+    try {
+      const res = await fetch("/api/memory/episodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `episode-${Date.now().toString(36)}`,
+          episode_body: episodeText.trim(),
+          source_description: "Dashboard manual ingest",
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast(`Gagal ingest: ${data?.detail || res.status}`)
+        return
+      }
+      setIngestModal(false)
+      setEpisodeText("")
+      showToast("Episode berhasil di-ingest oleh Graphiti memory engine")
+      fetchMemory()
+    } catch {
+      showToast("Gagal menghubungi backend API")
     }
-
-    setFacts([simulatedFact, ...facts])
-    setIngestModal(false)
-    setEpisodeText("")
-    showToast("Episode berhasil di-ingest oleh kurator Mnemosyne dengan sanitasi PII")
   }
 
   return (

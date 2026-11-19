@@ -1,7 +1,9 @@
 import uuid
+import os
 import time
 import json
 import asyncio
+import logging
 import operator
 from typing import Dict, List, Any, Optional, Tuple, Annotated, TypedDict
 
@@ -27,6 +29,8 @@ from packages.guardrails.guards import (
 )
 from packages.telemetry.correlation import CorrelationCalculator
 from packages.memory.temporal import TemporalMemoryStore
+
+logger = logging.getLogger("packages.orchestrator.atlas_engine")
 
 try:
     from deepagents import create_deep_agent
@@ -139,6 +143,121 @@ class AtlasOrchestrator:
         requires_human_confirmation = count > 4
         return count, agents[:10], requires_human_confirmation
 
+    async def _call_subagent_llm(
+        self,
+        agent_id: str,
+        objective: str,
+        run_id: str
+    ) -> Dict[str, Any]:
+        """Eksekusi subagent via LLM nyata (9router OpenAI-compatible /v1/chat/completions).
+
+        Mengembalikan {"output": dict, "citations": [...], "tokens": int, "cost_usd": float}.
+        Raise exception jika LLM tidak tersedia/gagal — caller menangani circuit breaker.
+        """
+        base_url = os.environ.get("ROUTER_BASE_URL", "https://9router.biezz.my.id/v1").rstrip("/")
+        api_key = os.environ.get("ROUTER_API_KEY") or os.environ.get("NINE_ROUTER_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("ROUTER_API_KEY tidak terkonfigurasi")
+        # Chain model: env ROUTER_LLM_MODEL diutamakan, fallback ke model yang
+        # terverifikasi aktif di 9router (comma-separated via ROUTER_LLM_FALLBACKS).
+        primary = os.environ.get("ROUTER_LLM_MODEL") or ""
+        fallbacks = [m.strip() for m in os.environ.get(
+            "ROUTER_LLM_FALLBACKS",
+            "groq/openai/gpt-oss-120b,kc/nvidia/nemotron-3-ultra-550b-a55b:free"
+        ).split(",") if m.strip()]
+        models = [m for m in [primary, *fallbacks] if m]
+
+        contract = CONTRACTS_MAP.get(agent_id)
+        role = contract.role if contract else agent_id
+        pod = contract.pod if contract else "unknown"
+        caps = ", ".join(contract.capabilities[:4]) if contract else ""
+
+        instructions = {
+            "clio": "Riset mendalam: berikan findings substantif dan sources/citations relevan.",
+            "vulcan": "Software engineer: hasilkan code_diff/usulan implementasi konkret (format unified diff atau penjelasan patch).",
+            "athena": "Critic reviewer: berikan critique tajam, approved true/false, dan isu yang ditemukan.",
+            "themis": "Security & compliance: laporkan integrity_verified, secret_hygiene, violations_count, dan temuan.",
+            "hermes": "Platform ops: laporkan system_health, latency, worker status, dan observasi infrastruktur.",
+            "mnemosyne": "Memory curator: ekstrak fakta penting (subject/predicate/object) dari objective.",
+            "metron": "Evaluation: berikan eval_score, cost_drift_pct, regression_gate (PASSED/FAILED), dan metrik.",
+            "iris": "Documentation writer: hasilkan dokumentasi/laporan eksekutif yang rapi.",
+            "janus": "Integration MCP hub: laporkan status integrasi MCP, tool annotations, dan konektivitas.",
+            "atlas": "Supervisor: sintesis delegasi dan rencana orkestrasi.",
+        }
+        instruction = instructions.get(agent_id, "Kerjakan tugas sesuai peranmu.")
+
+        system_prompt = (
+            f"Kamu adalah subagen {contract.name if contract else agent_id} "
+            f"(role: {role}, pod: {pod}{', capabilities: ' + caps if caps else ''}) "
+            f"dalam platform multi-agent LGP v2.0.\n"
+            f"{instruction}\n"
+            "Balas HANYA dengan JSON valid (tanpa markdown fence) dengan struktur "
+            '{"output": {...field relevan untuk peranmu...}, "citations": ["..."]}.'
+        )
+        user_prompt = f"Objective run {run_id}:\n{objective}"
+
+        from openai import AsyncOpenAI, APIError
+        client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=120.0)
+
+        last_err: Optional[Exception] = None
+        resp = None
+        used_model = ""
+        for model in models:
+            try:
+                kwargs: Dict[str, Any] = {}
+                if model.startswith("groq/"):
+                    kwargs["extra_body"] = {"reasoning_effort": "low"}
+                resp = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=4096,
+                    **kwargs,
+                )
+                used_model = model
+                break
+            except APIError as e:
+                last_err = e
+                logger.warning("LLM model %s gagal untuk %s: %s", model, agent_id, str(e)[:200])
+                continue
+        if resp is None:
+            raise last_err or RuntimeError("Semua model LLM fallback gagal")
+
+        content = resp.choices[0].message.content or ""
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.strip("`")
+            if content.lower().startswith("json"):
+                content = content[4:].strip()
+
+        usage = getattr(resp, "usage", None)
+        tokens = getattr(usage, "total_tokens", 0) or 0
+        # Estimasi biaya konservatif $0.000002/token untuk model router internal
+        cost_usd = round(tokens * 0.000002, 6)
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            parsed = {"output": {"result": content}}
+
+        output = parsed.get("output", parsed if isinstance(parsed, dict) else {})
+        citations = parsed.get("citations", []) if isinstance(parsed, dict) else []
+        if not isinstance(output, dict):
+            output = {"result": str(output)}
+        if not isinstance(citations, list):
+            citations = []
+
+        return {
+            "output": output,
+            "citations": [str(c) for c in citations[:10]],
+            "tokens": tokens,
+            "cost_usd": cost_usd,
+            "model": used_model,
+        }
+
     async def _emit_event(
         self,
         run_id: str,
@@ -246,8 +365,8 @@ class AtlasOrchestrator:
                     }
 
                 t_start = time.time()
-                step_tokens = 15000
-                step_cost = 0.08
+                step_tokens = 0
+                step_cost = 0.0
                 handoffs: List[Tuple[str, str]] = [("atlas", agent_id)]
                 citations_new: List[str] = []
                 report_entry: Dict[str, Any] = {
@@ -259,90 +378,96 @@ class AtlasOrchestrator:
 
                 await self._emit_event(run_id, "atlas", "delegate", {"to": agent_id})
 
-                # Logika Spesifik Tiap Subagent
-                if agent_id == "clio":
-                    SecurityToolGuard.validate_subagent_tool_access("clio", "web_search", {})
-                    sources = ["https://arxiv.org/abs/2501.13956", "https://anthropic.com/research/multi-agent"]
-                    citations_new.extend(sources)
-                    report_entry["output"] = {
-                        "findings": [
-                            f"Hasil riset mendalam untuk: '{objective}'",
-                            "Literatur multi-agent mendukung pola supervisor-via-tools",
-                            "Bi-temporal memory memisahkan valid_at dan created_at"
-                        ],
-                        "sources": sources
+                # Guardrail: budget harian + least-privilege tool access check
+                if not self.budget_manager.check_daily_limit(step_cost):
+                    self.circuit_breaker.record_failure(agent_id)
+                    report_entry["status"] = "budget_exceeded"
+                    report_entry["output"] = {"denied": True, "reason": "daily_hard_stop"}
+                    return {
+                        "current_subagent": agent_id,
+                        "delegates_report": [report_entry],
+                        "citations": citations_new,
+                        "handoffs_record": handoffs,
+                        "tokens_spent": 0,
+                        "cost_spent": 0.0,
+                    }
+                allowed, deny_reason = SecurityToolGuard.validate_subagent_tool_access(
+                    agent_id, "llm:delegate", {"objective": objective[:200]}
+                )
+                if not allowed:
+                    self.circuit_breaker.record_failure(agent_id)
+                    report_entry["status"] = "denied"
+                    report_entry["output"] = {"denied": True, "reason": deny_reason}
+                    return {
+                        "current_subagent": agent_id,
+                        "delegates_report": [report_entry],
+                        "citations": citations_new,
+                        "handoffs_record": handoffs,
+                        "tokens_spent": 0,
+                        "cost_spent": 0.0,
                     }
 
-                elif agent_id == "vulcan":
-                    report_entry["output"] = {
-                        "code_diff": "diff --git a/graph.py b/graph.py\n+ def execute_node(state): return state",
-                        "status": "proposed"
+                # Eksekusi subagent nyata via LLM (9router OpenAI-compatible)
+                try:
+                    llm_result = await self._call_subagent_llm(agent_id, objective, run_id)
+                    report_entry["output"] = llm_result.get("output", {})
+                    if llm_result.get("model"):
+                        report_entry["model"] = llm_result["model"]
+                    if llm_result.get("citations"):
+                        citations_new.extend(llm_result["citations"])
+                    if llm_result.get("tokens"):
+                        step_tokens = llm_result["tokens"]
+                    if llm_result.get("cost_usd") is not None:
+                        step_cost = llm_result["cost_usd"]
+                except Exception as llm_err:
+                    logger.warning("LLM call subagent %s gagal: %s", agent_id, llm_err)
+                    self.circuit_breaker.record_failure(agent_id)
+                    report_entry["status"] = "failed"
+                    report_entry["output"] = {"error": str(llm_err)}
+                    return {
+                        "current_subagent": agent_id,
+                        "delegates_report": [report_entry],
+                        "citations": citations_new,
+                        "handoffs_record": handoffs,
+                        "tokens_spent": step_tokens,
+                        "cost_spent": step_cost,
                     }
 
-                elif agent_id == "athena":
-                    critique = "Kode bersih, lulus sanitasi AST, lolos audit keamanan."
-                    step_tokens = 8000
-                    step_cost = 0.04
-                    handoffs.extend([("vulcan", "athena"), ("athena", "vulcan")])
-                    report_entry["output"] = {"critique": critique, "approved": True}
-                    report_entry["critique"] = critique
-                    report_entry["approved"] = True
-
-                elif agent_id == "themis":
-                    report_entry["output"] = {
-                        "integrity_verified": True,
-                        "secret_hygiene": "Semua rahasia menggunakan referensi 'secret://' - tidak ada plain secret bocor",
-                        "violations_count": 0
-                    }
-
-                elif agent_id == "hermes":
-                    report_entry["output"] = {
-                        "system_health": "100% OK",
-                        "latency_p95_ms": 120.4,
-                        "active_workers": 4
-                    }
-
-                elif agent_id == "mnemosyne":
-                    fact = TemporalMemoryStore.create_fact(
-                        subject=f"Run_{run_id}",
-                        predicate="ACCOMPLISHED",
-                        obj=objective,
-                        episode_run_id=run_id
-                    )
-                    db_conn = await get_db_connection()
+                # Efek samping khusus Mnemosyne: persist fakta ke temporal store
+                if agent_id == "mnemosyne":
                     try:
-                        await db_conn.execute("""
-                            INSERT INTO temporal_facts (
-                                fact_id, subject, predicate, object, valid_at,
-                                invalid_at, created_at, expired_at, episode_run_id, pii_redacted
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            fact.fact_id, fact.subject, fact.predicate, fact.object,
-                            fact.valid_at, fact.invalid_at, fact.created_at,
-                            fact.expired_at, fact.episode_run_id, 1
-                        ))
-                        await db_conn.commit()
-                    finally:
-                        await db_conn.close()
-                    report_entry["output"] = {"facts_ingested": 1, "fact_id": fact.fact_id}
+                        fact = TemporalMemoryStore.create_fact(
+                            subject=f"Run_{run_id}",
+                            predicate="ACCOMPLISHED",
+                            obj=objective,
+                            episode_run_id=run_id
+                        )
+                        db_conn = await get_db_connection()
+                        try:
+                            await db_conn.execute("""
+                                INSERT INTO temporal_facts (
+                                    fact_id, subject, predicate, object, valid_at,
+                                    invalid_at, created_at, expired_at, episode_run_id, pii_redacted
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                fact.fact_id, fact.subject, fact.predicate, fact.object,
+                                fact.valid_at, fact.invalid_at, fact.created_at,
+                                fact.expired_at, fact.episode_run_id, 1
+                            ))
+                            await db_conn.commit()
+                        finally:
+                            await db_conn.close()
+                        report_entry["output"]["facts_ingested"] = 1
+                        report_entry["output"]["fact_id"] = fact.fact_id
+                    except Exception as mem_err:
+                        logger.warning("Mnemosyne persist gagal: %s", mem_err)
 
-                elif agent_id == "metron":
-                    report_entry["output"] = {
-                        "eval_score": 0.96,
-                        "cost_drift_pct": 2.1,
-                        "regression_gate": "PASSED"
-                    }
+                # Critic loop Vulcan <-> Athena tetap dipertahankan
+                if agent_id == "athena" and "vulcan" in (state.get("selected_agents") or []):
+                    handoffs.extend([("vulcan", "athena"), ("athena", "vulcan")])
 
-                elif agent_id == "iris":
-                    report_entry["output"] = {
-                        "documentation": f"Laporan eksekutif tersusun rapi untuk target: '{objective}'"
-                    }
-
-                elif agent_id == "janus":
-                    report_entry["output"] = {
-                        "mcp_servers_healthy": 3,
-                        "tool_annotations_validated": True
-                    }
+                self.circuit_breaker.record_success(agent_id)
+                self.budget_manager.daily_spent_usd += step_cost
 
                 latency_ms = (time.time() - t_start) * 1000
                 await self._emit_event(
@@ -525,15 +650,16 @@ class AtlasOrchestrator:
                 return f"{cur_}_approval"
 
             done_agents = [r["subagent"] for r in state.get("delegates_report", []) if r.get("status") == "completed"]
+            terminal_agents = {r["subagent"] for r in state.get("delegates_report", []) if r.get("status") in ("completed", "tripped", "failed", "denied", "budget_exceeded", "interrupted")}
             cur = state.get("current_subagent")
             selected = state.get("selected_agents", [])
 
             # Critic Loop Swarm: Vulcan -> Athena jika keduanya terpilih
-            if cur == "vulcan" and "athena" in selected and "athena" not in done_agents:
+            if cur == "vulcan" and "athena" in selected and "athena" not in done_agents and "athena" not in terminal_agents:
                 return "athena"
 
             for agent in selected:
-                if agent not in done_agents:
+                if agent not in terminal_agents:
                     if agent in ["clio", "vulcan", "athena", "themis", "hermes", "mnemosyne", "metron", "iris", "janus"]:
                         return agent
 
@@ -571,11 +697,17 @@ class AtlasOrchestrator:
         requested_subagents: Optional[List[str]] = None,
         event_callback: Optional[Any] = None,
         use_deepagents: bool = False,
-        checkpointer: Optional[BaseCheckpointSaver] = None
+        checkpointer: Optional[BaseCheckpointSaver] = None,
+        run_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
         now = time.time()
         self._active_callback = event_callback
+        # Scope LoopDetector per run agar run berbeda tidak saling false-positive
+        try:
+            self.loop_detector.history.clear()
+        except Exception:
+            pass
 
         # 1. Effort scaling
         count, selected_agents, needs_confirm = self.determine_effort_scaling(objective, requested_subagents)
@@ -739,8 +871,23 @@ class AtlasOrchestrator:
         }
 
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-        final_state = await graph.ainvoke(initial_state, config=config)
-        return await self._finalize(final_state, run_id)
+        try:
+            final_state = await graph.ainvoke(initial_state, config=config)
+            return await self._finalize(final_state, run_id)
+        except Exception as e:
+            logger.error("execute_run gagal untuk run %s: %s", run_id, e)
+            db = await get_db_connection()
+            try:
+                await db.execute(
+                    "UPDATE runs SET status = 'failed', updated_at = ? WHERE run_id = ?",
+                    (time.time(), run_id)
+                )
+                await db.commit()
+            finally:
+                await db.close()
+            await record_audit_log("atlas", "run.failed", f"run:{run_id}", {"error": str(e)}, "error")
+            await self._emit_event(run_id, "atlas", "node.error", {"error": str(e)})
+            return {"run_id": run_id, "status": "failed", "error": str(e)}
 
     async def _finalize(self, final_state: Dict[str, Any], run_id: str) -> Dict[str, Any]:
         if final_state.get("__interrupt__"):

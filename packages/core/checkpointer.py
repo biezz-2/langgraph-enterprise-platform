@@ -22,6 +22,10 @@ load_dotenv()
 logger = logging.getLogger("packages.core.checkpointer")
 
 SUPABASE_SCHEMA = os.environ.get("SUPABASE_SCHEMA", "langgraph")
+# Skema khusus untuk tabel internal LangGraph saver (checkpoints/checkpoint_blobs/
+# checkpoint_writes) agar tidak bentrok dengan tabel aplikasi 'checkpoints' di skema
+# SUPABASE_SCHEMA yang dibuat oleh packages/core/db.py.
+CHECKPOINTER_SCHEMA = os.environ.get("CHECKPOINTER_SCHEMA", "lgp_ckpt")
 USE_SUPABASE = os.environ.get("USE_SUPABASE", "false").lower() == "true"
 
 _pool: Optional[AsyncConnectionPool] = None
@@ -58,7 +62,7 @@ def get_postgres_conninfo() -> Optional[str]:
 async def get_checkpointer_pool(schema: Optional[str] = None) -> Optional[AsyncConnectionPool]:
     """Mengembalikan connection pool psycopg 3 dengan max 5 koneksi (ADR-011) dan isolasi skema."""
     global _pool, _pool_loop
-    target_schema = schema or SUPABASE_SCHEMA
+    target_schema = schema or CHECKPOINTER_SCHEMA
     conninfo = get_postgres_conninfo()
     if not conninfo:
         logger.warning("PostgreSQL credentials tidak lengkap untuk checkpointer.")
@@ -122,7 +126,7 @@ async def close_checkpointer_pool() -> None:
 async def get_async_postgres_saver(schema: Optional[str] = None) -> Optional[AsyncPostgresSaver]:
     """Mengembalikan instance AsyncPostgresSaver dengan setup tabel skema terisolasi."""
     global _saver_instance, _saver_loop, _setup_completed
-    target_schema = schema or SUPABASE_SCHEMA
+    target_schema = schema or CHECKPOINTER_SCHEMA
     curr_loop = asyncio.get_running_loop()
 
     pool = await get_checkpointer_pool(target_schema)
@@ -145,7 +149,7 @@ async def get_async_postgres_saver(schema: Optional[str] = None) -> Optional[Asy
 
 async def get_checkpointer(schema: Optional[str] = None, fallback_to_memory: bool = True) -> BaseCheckpointSaver:
     """Factory pembuat checkpointer: AsyncPostgresSaver jika DB tersedia, MemorySaver sebagai fallback."""
-    target_schema = schema or SUPABASE_SCHEMA
+    target_schema = schema or CHECKPOINTER_SCHEMA
     conninfo = get_postgres_conninfo()
     if USE_SUPABASE and conninfo:
         try:

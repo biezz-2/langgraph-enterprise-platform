@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import { FALLBACK_HITL_INBOX } from "@/lib/mockData"
 import type { HITLItem } from "@/types"
 import {
@@ -31,32 +32,59 @@ export default function HITLPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  useEffect(() => {
-    async function fetchHITL() {
-      try {
-        const res = await fetch("/api/hitl")
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data) && data.length > 0) {
-            setItems(data)
-          }
+  const fetchHITL = useCallback(async () => {
+    try {
+      const res = await fetch("/api/hitl")
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) {
+          setItems(data)
         }
-      } catch {
-        // Fallback active
       }
+    } catch {
+      // Fallback active
     }
-    fetchHITL()
   }, [])
 
-  const handleDecision = (id: string, decision: "approved" | "rejected") => {
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: decision } : item))
-    )
-    showToast(
-      `Tindakan interupsi ${id} berhasil di-${
-        decision === "approved" ? "SETUJUI (APPROVED)" : "TOLAK (REJECTED)"
-      }`
-    )
+  useEffect(() => {
+    fetchHITL()
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "hitl_updated") fetchHITL()
+    })
+    return unsub
+  }, [fetchHITL])
+
+  const handleDecision = async (item: HITLItem, decision: "approved" | "rejected") => {
+    try {
+      const res = await fetch("/api/hitl/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interrupt_id: item.interrupt_id || item.id,
+          approver: "dashboard-user",
+          decision,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast(`Gagal: ${data?.detail || res.status}`)
+        return
+      }
+      setItems((prev) =>
+        prev.map((it) =>
+          (it.interrupt_id || it.id) === (item.interrupt_id || item.id)
+            ? { ...it, status: decision }
+            : it
+        )
+      )
+      showToast(
+        `Tindakan interupsi ${item.interrupt_id || item.id} berhasil di-${
+          decision === "approved" ? "SETUJUI (APPROVED)" : "TOLAK (REJECTED)"
+        }`
+      )
+    } catch {
+      showToast("Gagal menghubungi backend API")
+    }
   }
 
   const openModifyModal = (item: HITLItem) => {
@@ -64,19 +92,33 @@ export default function HITLPage() {
     setModifiedPayload(JSON.stringify(item.proposed_payload, null, 2))
   }
 
-  const saveModificationAndApprove = () => {
+  const saveModificationAndApprove = async () => {
     if (!modifyingItem) return
     try {
       const parsed = JSON.parse(modifiedPayload)
+      const res = await fetch("/api/hitl/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interrupt_id: modifyingItem.interrupt_id || modifyingItem.id,
+          approver: "dashboard-user",
+          decision: "approved",
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        showToast(`Gagal: ${data?.detail || res.status}`)
+        return
+      }
       setItems((prev) =>
         prev.map((item) =>
-          item.id === modifyingItem.id
+          (item.interrupt_id || item.id) === (modifyingItem.interrupt_id || modifyingItem.id)
             ? { ...item, proposed_payload: parsed, status: "approved" }
             : item
         )
       )
       setModifyingItem(null)
-      showToast(`Payload dimodifikasi dan interupsi ${modifyingItem.id} DISETUJUI`)
+      showToast(`Payload dimodifikasi dan interupsi ${modifyingItem.interrupt_id || modifyingItem.id} DISETUJUI`)
     } catch {
       alert("Format JSON tidak valid. Silakan periksa kembali sintaks.")
     }
@@ -205,7 +247,7 @@ export default function HITLPage() {
                   {isPending && (
                     <div className="flex items-center gap-2 pt-2 md:pt-0">
                       <button
-                        onClick={() => handleDecision(item.id, "approved")}
+                        onClick={() => handleDecision(item, "approved")}
                         className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition"
                       >
                         <Check className="w-3.5 h-3.5" />
@@ -221,7 +263,7 @@ export default function HITLPage() {
                       </button>
 
                       <button
-                        onClick={() => handleDecision(item.id, "rejected")}
+                        onClick={() => handleDecision(item, "rejected")}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition"
                       >
                         <X className="w-3.5 h-3.5" />

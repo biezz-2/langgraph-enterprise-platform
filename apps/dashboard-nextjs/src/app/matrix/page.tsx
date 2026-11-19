@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import { generateFallbackCorrelationMatrix } from "@/lib/mockData"
 import type { CorrelationMatrixCell } from "@/types"
 import {
@@ -28,44 +29,47 @@ export default function MatrixPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  useEffect(() => {
-    async function fetchMatrix() {
-      try {
-        const res = await fetch("/api/matrix")
-        if (res.ok) {
-          const resData = await res.json()
-          if (resData && resData.matrix) {
-            setData(resData)
-          }
+  const fetchMatrix = useCallback(async () => {
+    try {
+      const res = await fetch("/api/matrix")
+      if (res.ok) {
+        const resData = await res.json()
+        if (resData && resData.matrix) {
+          setData(resData)
         }
-      } catch {
-        // Fallback active
       }
+    } catch {
+      // Fallback active
     }
-    fetchMatrix()
   }, [])
 
-  const handleRecalculate = () => {
-    // Recompute weights dynamically based on current sliders
-    const updated = {
-      ...data,
-      matrix: data.matrix.map((row) =>
-        row.map((cell) => {
-          if (cell.source === cell.target) return cell
-          const newWeight = Number((alpha * cell.npmi + beta * 0.75 + gamma * cell.handoff_rate).toFixed(3))
-          return {
-            ...cell,
-            weight: newWeight,
-            polarity: newWeight >= 0.7 ? "high" : newWeight >= 0.5 ? "medium" : "low",
-          }
-        })
-      ),
-      alpha,
-      beta,
-      gamma,
+  useEffect(() => {
+    fetchMatrix()
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "correlation_updated" || evt.event === "matrix_updated") fetchMatrix()
+    })
+    return unsub
+  }, [fetchMatrix])
+
+  const handleRecalculate = async () => {
+    try {
+      // Persist bobot ke backend lalu picu rekalkulasi server-side
+      await fetch("/api/matrix/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alpha, beta, gamma, n_min: 50, enabled: true }),
+      })
+      const res = await fetch("/api/matrix/recalculate", { method: "POST" })
+      const resData = await res.json().catch(() => ({}))
+      if (res.ok && resData?.matrix) {
+        setData(resData)
+        showToast(`Matriks korelasi 10x10 berhasil di-rekalkulasi server-side (α=${alpha}, β=${beta}, γ=${gamma})`)
+      } else {
+        showToast(`Rekalkulasi gagal: ${resData?.detail || res.status}`)
+      }
+    } catch {
+      showToast("Gagal menghubungi backend API")
     }
-    setData(updated)
-    showToast(`Matriks korelasi 10x10 berhasil di-rekalkulasi dengan α=${alpha}, β=${beta}, γ=${gamma}`)
   }
 
   const getHeatmapColor = (weight: number, isSelf: boolean) => {

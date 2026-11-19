@@ -2,6 +2,7 @@ import os
 import json
 import hashlib
 import time
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Union
@@ -196,7 +197,8 @@ async def get_supabase_pool() -> Optional[asyncpg.Pool]:
     if supabase_pool is not None:
         try:
             curr_loop = asyncio.get_running_loop()
-            if supabase_pool._loop is curr_loop and not curr_loop.is_closed():
+            pool_loop = getattr(supabase_pool, "_loop", None)
+            if pool_loop is curr_loop and not curr_loop.is_closed():
                 return supabase_pool
             else:
                 try:

@@ -8,7 +8,6 @@ import {
   CircuitBreakerEvent,
   SystemHealth,
   FastMCPTool,
-  KanbanBoard,
 } from "@/types"
 import { NeuronGraphData } from "@/types/neuron"
 
@@ -571,153 +570,6 @@ export const FALLBACK_MEMORY_FACTS: MemoryFact[] = [
   },
 ]
 
-export const FALLBACK_KANBAN_BOARD: KanbanBoard = {
-  id: "board-agents-md",
-  name: "AGENTS.md Phase-Gate Lifecycle Board",
-  columns: [
-    {
-      id: "col-backlog",
-      name: "BACKLOG",
-      order_idx: 0,
-      cards: [
-        {
-          id: "card-b1",
-          column_id: "col-backlog",
-          title: "Metron: Autonomous Drift Detection Suite",
-          description: "Establish LLM-as-judge benchmark against +/-20% latency and token cost variations across all 10 subagents.",
-          priority: "medium",
-          phase_ref: "p03",
-          severity: "MINOR",
-          assigned_to: "metron",
-          created_at: Date.now() - 1000 * 60 * 60 * 24 * 2,
-        },
-        {
-          id: "card-b2",
-          column_id: "col-backlog",
-          title: "Iris: Executive ADR & PRD Documentation Pipeline",
-          description: "Automate generation of architecture decision records from checkpoint state diffs.",
-          priority: "low",
-          phase_ref: "p04",
-          severity: null,
-          assigned_to: "iris",
-          created_at: Date.now() - 1000 * 60 * 60 * 24 * 1,
-        },
-      ],
-    },
-    {
-      id: "col-in-progress",
-      name: "IN PROGRESS",
-      order_idx: 1,
-      cards: [
-        {
-          id: "card-ip1",
-          column_id: "col-in-progress",
-          title: "Atlas: ContextPacket v2.0 Distribution",
-          description: "Partition incoming objectives across Clio, Vulcan, and Athena with granular tool grant boundaries.",
-          priority: "critical",
-          phase_ref: "p02",
-          severity: "BLOCKER",
-          assigned_to: "atlas",
-          created_at: Date.now() - 1000 * 60 * 60 * 8,
-        },
-        {
-          id: "card-ip2",
-          column_id: "col-in-progress",
-          title: "Mnemosyne: Bi-temporal Invalidation Query Engine",
-          description: "Implement as_of_valid_time and as_of_record_time indices on SQLite WAL store.",
-          priority: "high",
-          phase_ref: "p02",
-          severity: "MAJOR",
-          assigned_to: "mnemosyne",
-          created_at: Date.now() - 1000 * 60 * 60 * 12,
-        },
-      ],
-    },
-    {
-      id: "col-implemented",
-      name: "IMPLEMENTED",
-      order_idx: 2,
-      cards: [
-        {
-          id: "card-imp1",
-          column_id: "col-implemented",
-          title: "Vulcan: Sandboxed AST Node Transformation",
-          description: "Code generation engine now checks syntax trees prior to sandbox test execution.",
-          priority: "high",
-          phase_ref: "p01",
-          severity: "MAJOR",
-          assigned_to: "vulcan",
-          created_at: Date.now() - 1000 * 60 * 60 * 6,
-        },
-      ],
-    },
-    {
-      id: "col-in-validation",
-      name: "IN VALIDATION",
-      order_idx: 3,
-      cards: [
-        {
-          id: "card-val1",
-          column_id: "col-in-validation",
-          title: "Athena: V1-V8 Independent Gate on Vulcan Patch",
-          description: "Active review for injection risks, OWASP Top 10 vulnerabilities, and standard unit test coverage.",
-          priority: "high",
-          phase_ref: "p01",
-          severity: "MAJOR",
-          assigned_to: "athena",
-          created_at: Date.now() - 1000 * 60 * 60 * 3,
-        },
-      ],
-    },
-    {
-      id: "col-validated",
-      name: "VALIDATED",
-      order_idx: 4,
-      cards: [
-        {
-          id: "card-vd1",
-          column_id: "col-validated",
-          title: "Themis: Tamper-Evident Hash-Chain Ledger",
-          description: "Verified SHA-256 backward pointer integrity across 50,000 synthetic transaction records.",
-          priority: "critical",
-          phase_ref: "p00",
-          severity: null,
-          assigned_to: "themis",
-          created_at: Date.now() - 1000 * 60 * 60 * 48,
-        },
-        {
-          id: "card-vd2",
-          column_id: "col-validated",
-          title: "Hermes: Circuit Breaker Auto-Cooldown Trigger",
-          description: "Tripping subagents smoothly transition to HALF-OPEN after 60s cooldown window.",
-          priority: "medium",
-          phase_ref: "p00",
-          severity: null,
-          assigned_to: "hermes",
-          created_at: Date.now() - 1000 * 60 * 60 * 36,
-        },
-      ],
-    },
-    {
-      id: "col-rework",
-      name: "REWORK",
-      order_idx: 5,
-      cards: [
-        {
-          id: "card-rw1",
-          column_id: "col-rework",
-          title: "Janus: OWASP LLM06 Excessive Agency Mitigation",
-          description: "Athena rejected external MCP hub PR due to missing tool annotation readOnlyHint enforcement.",
-          priority: "critical",
-          phase_ref: "p01",
-          severity: "BLOCKER",
-          assigned_to: "janus",
-          created_at: Date.now() - 1000 * 60 * 60 * 5,
-        },
-      ],
-    },
-  ],
-}
 
 export const FALLBACK_OWASP_LOGS: OWASPGuardrailLog[] = [
   {
@@ -765,6 +617,7 @@ export const FALLBACK_OWASP_LOGS: OWASPGuardrailLog[] = [
     timestamp: Date.now() - 1000 * 60 * 60 * 4,
   },
 ]
+
 
 export const FALLBACK_AUDIT_LOG: AuditLogEntry[] = [
   {

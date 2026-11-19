@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import { FALLBACK_RUNS } from "@/lib/mockData"
 import type { Run, RunStep, CheckpointRecord } from "@/types"
 import {
@@ -26,6 +27,7 @@ export default function RunsPage() {
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<CheckpointRecord | null>(null)
   const [newRunModal, setNewRunModal] = useState<boolean>(false)
   const [newObjective, setNewObjective] = useState<string>("")
+  const [creatingRun, setCreatingRun] = useState<boolean>(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
@@ -33,22 +35,29 @@ export default function RunsPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  useEffect(() => {
-    async function fetchRuns() {
-      try {
-        const res = await fetch("/api/runs")
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data) && data.length > 0) {
-            setRuns(data)
-          }
+  const fetchRuns = useCallback(async () => {
+    try {
+      const res = await fetch("/api/runs")
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data) && data.length > 0) {
+          setRuns(data)
+        } else if (Array.isArray(data)) {
+          setRuns([])
         }
-      } catch {
-        // Fallback active
       }
+    } catch {
+      // Fallback active
     }
-    fetchRuns()
   }, [])
+
+  useEffect(() => {
+    fetchRuns()
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "run_updated" || evt.event === "telemetry_emitted") fetchRuns()
+    })
+    return unsub
+  }, [fetchRuns])
 
   const selectedRun = runs.find((r) => r.run_id === selectedRunId) || runs[0]
 
@@ -61,47 +70,30 @@ export default function RunsPage() {
     }
   }, [selectedRunId])
 
-  const handleCreateRun = (e: React.FormEvent) => {
+  const handleCreateRun = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newObjective.trim()) return
-
-    const newRun: Run = {
-      run_id: `run-${Date.now().toString(36)}`,
-      thread_id: `th-${Math.random().toString(36).substring(2, 8)}`,
-      objective: newObjective.trim(),
-      status: "running",
-      created_at: Date.now(),
-      budget_used: 0.05,
-      current_subagent: "atlas",
-      total_latency_s: 0.8,
-      total_tokens: 4200,
-      steps: [
-        {
-          id: "step-init-1",
-          node_name: "decompose_objective",
-          subagent: "atlas",
-          status: "running",
-          latency_ms: 320,
-          token_usage: { input_tokens: 1200, output_tokens: 450, total_tokens: 1650, cost_usd: 0.04 },
-          started_at: new Date().toLocaleTimeString(),
-        },
-      ],
-      checkpoints: [
-        {
-          checkpoint_id: `chk-${Date.now().toString(36)}`,
-          step_index: 1,
-          node: "atlas",
-          timestamp: new Date().toLocaleTimeString(),
-          state_snapshot: { objective: newObjective.trim(), supervisor: "atlas", status: "decomposing" },
-        },
-      ],
+    if (!newObjective.trim() || creatingRun) return
+    setCreatingRun(true)
+    try {
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ objective: newObjective.trim() }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        showToast(`Gagal membuat run: ${data?.detail || res.status}`)
+        return
+      }
+      setNewRunModal(false)
+      setNewObjective("")
+      showToast(`Run ${data.run_id || ""} status: ${data.status || "unknown"}`)
+      fetchRuns()
+    } catch {
+      showToast("Gagal menghubungi backend API")
+    } finally {
+      setCreatingRun(false)
     }
-
-    setRuns([newRun, ...runs])
-    setSelectedRunId(newRun.run_id)
-    setNewRunModal(false)
-    setNewObjective("")
-    showToast(`Run baru ${newRun.run_id} berhasil dibuat dan dijadwalkan ke Atlas supervisor`)
   }
 
   return (

@@ -1,7 +1,9 @@
 import os
 import json
 import time
+import uuid
 import asyncio
+import logging
 from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
@@ -26,6 +28,8 @@ from contextlib import asynccontextmanager
 from apps.api.hermes_sync import run_full_sync, sync_db_boards_to_hermes
 from apps.api.routers.langgraph_server import router as langgraph_server_router, create_langgraph_tables
 
+logger = logging.getLogger("apps.api.main")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -38,7 +42,11 @@ async def lifespan(app: FastAPI):
         await db.close()
     except Exception as e:
         print(f"[HERMES_SYNC] Initial sync error: {e}")
+    # Task queue worker: konsumsi TaskQueue(task_type='run') secara async
+    from apps.api.task_worker import start_task_worker, stop_task_worker
+    app.state.task_worker = start_task_worker()
     yield
+    await stop_task_worker(getattr(app.state, "task_worker", None))
 
 app = FastAPI(
     title="Enterprise LangGraph Platform (LGP v2.0)",
@@ -73,9 +81,6 @@ import os
 dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard")
 if os.path.exists(dashboard_path):
     app.mount("/dashboard", StaticFiles(directory=dashboard_path, html=True), name="dashboard")
-
-# Include LangGraph Server API Router (Phase 2)
-app.include_router(langgraph_server_router, prefix="/api")
 
 orchestrator = AtlasOrchestrator()
 mcp_server = AdminMCPServer()
@@ -127,44 +132,63 @@ class CreateRunRequest(BaseModel):
     subagents: Optional[List[str]] = None
     use_deepagents: bool = False
 
-@app.post("/api/runs")
-async def create_run(req: CreateRunRequest, background_tasks: BackgroundTasks):
-    thread_id = req.thread_id or f"th-{int(asyncio.get_event_loop().time() * 1000)}"
+@app.post("/api/runs", status_code=202)
+async def create_run(req: CreateRunRequest):
+    """Non-blocking: enqueue run ke task queue dan return segera.
 
-    # Create run queue for SSE
+    Eksekusi dilakukan worker (apps/api/task_worker.py). Client memantau
+    progres via GET /api/runs/{run_id} atau SSE /api/runs/{run_id}/stream.
+    """
+    thread_id = req.thread_id or f"th-{uuid.uuid4().hex[:12]}"
+    run_id = f"run-{uuid.uuid4().hex[:12]}"
+
     queue = asyncio.Queue()
+    run_event_queues[run_id] = queue
 
-    async def event_listener(evt):
-        evt_data = evt.model_dump()
-        await queue.put(evt_data)
-        GlobalEventBus.get_instance().publish_sync("telemetry_emitted", evt_data)
-
-    # Broadcast run initiation
     GlobalEventBus.get_instance().publish_sync("run_updated", {
-        "status": "initiated",
+        "run_id": run_id,
+        "status": "queued",
         "objective": req.objective,
         "thread_id": thread_id
     })
 
-    # Run execution in background or directly
-    result = await orchestrator.execute_run(
+    from apps.api.task_worker import enqueue_run_task
+    task_id = await enqueue_run_task(
+        run_id=run_id,
         thread_id=thread_id,
         objective=req.objective,
-        requested_subagents=req.subagents,
-        event_callback=event_listener,
-        use_deepagents=req.use_deepagents
+        subagents=req.subagents,
+        use_deepagents=req.use_deepagents,
     )
 
-    run_id = result.get("run_id")
-    if run_id:
-        run_event_queues[run_id] = queue
-        GlobalEventBus.get_instance().publish_sync("run_updated", {
-            "run_id": run_id,
-            "status": result.get("status", "completed"),
-            "final_answer": result.get("final_answer", "")
-        })
+    if task_id is None:
+        # Fallback: task queue tidak tersedia (mis. mode SQLite) — jalankan langsung di background
+        async def _bg_listener(evt):
+            await queue.put(evt.model_dump())
+        async def _bg_run():
+            try:
+                await orchestrator.execute_run(
+                    thread_id=thread_id,
+                    objective=req.objective,
+                    requested_subagents=req.subagents,
+                    event_callback=_bg_listener,
+                    use_deepagents=req.use_deepagents,
+                    run_id=run_id,
+                )
+            except Exception as e:
+                logger.error("Background run %s gagal: %s", run_id, e)
+        asyncio.create_task(_bg_run())
+        queue_mode = "background"
+    else:
+        queue_mode = "task_queue"
 
-    return result
+    return {
+        "run_id": run_id,
+        "thread_id": thread_id,
+        "status": "queued",
+        "queue_mode": queue_mode,
+        "task_id": task_id,
+    }
 
 @app.get("/api/runs")
 async def list_runs(limit: int = 20):
@@ -266,22 +290,24 @@ async def get_hitl_inbox():
             items = []
             for r in rows:
                 d = dict(r)
-                payload = d.get("proposed_payload")
+                payload = d.get("state_diff_json")
                 if isinstance(payload, str):
                     try:
                         payload = json.loads(payload)
                     except Exception:
                         pass
                 items.append({
-                    "id": str(d.get("id")),
+                    "id": d.get("interrupt_id") or "",
                     "interrupt_id": d.get("interrupt_id") or "",
                     "thread_id": d.get("thread_id") or "",
                     "run_id": d.get("run_id") or "",
-                    "subagent": d.get("subagent") or "atlas",
-                    "action_type": d.get("action_type") or "TOOL_EXECUTE",
-                    "description": d.get("description") or "",
+                    "subagent": d.get("subagent_id") or "atlas",
+                    "action_type": d.get("reason") or "INTERRUPT",
+                    "description": d.get("reason") or "",
                     "risk_level": d.get("risk_level") or "medium",
                     "proposed_payload": payload or {},
+                    "approver": d.get("approver") or "",
+                    "decision": d.get("decision") or "",
                     "created_at": d.get("created_at") or "",
                     "status": d.get("status") or "pending"
                 })
@@ -886,17 +912,18 @@ async def get_embedding_telemetry():
 
 @app.get("/api/embedding/atlas")
 async def get_embedding_atlas(limit: int = 50):
+    db = None
     try:
         db = await get_db_connection()
         facts = []
         try:
-            async with db.execute("SELECT id, subject, predicate, object, valid_at FROM temporal_facts WHERE invalid_at IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)) as cursor:
+            async with db.execute("SELECT fact_id, subject, predicate, object, valid_at FROM temporal_facts WHERE invalid_at IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)) as cursor:
                 rows = await cursor.fetchall()
                 for r in rows:
                     text = f"{r['subject']} {r['predicate']} {r['object']}".strip()
-                    facts.append({"id": str(r["id"]), "text": text, "category": "memory"})
+                    facts.append({"id": str(r["fact_id"]), "text": text, "category": "memory"})
         except Exception as query_err:
-            logger.warning(f"[EMBEDDING_API] query error: {query_err}")
+            logger.warning("[EMBEDDING_API] query error: %s", query_err)
 
         if not facts:
             return {"status": "success", "total_nodes": 0, "nodes": []}
@@ -919,6 +946,12 @@ async def get_embedding_atlas(limit: int = 50):
     except Exception as e:
         print(f"[EMBEDDING_API] atlas error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if db is not None:
+            try:
+                await db.close()
+            except Exception:
+                pass
 
 class UmapProjectionRequest(BaseModel):
     vectors: List[List[float]]
@@ -948,5 +981,9 @@ async def fuse_endpoint(req: RrfFusionRequest):
     except Exception as e:
         print(f"[EMBEDDING_API] fuse error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Include LangGraph Server API Router (Phase 2) — mounted LAST so Atlas routes
+# above take precedence on conflicting paths (/api/runs, /api/health, etc.)
+app.include_router(langgraph_server_router, prefix="/api")
 
 

@@ -52,12 +52,27 @@ export default function GuardrailsPage() {
     fetchTelemetry()
   }, [])
 
-  const handleVerifyChain = () => {
+  const handleVerifyChain = async () => {
     setIsVerifyingChain(true)
-    setTimeout(() => {
+    try {
+      const res = await fetch("/mcp/admin/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: "lgp_audit_verify", arguments: {}, actor: "dashboard" }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (data?.is_valid === true) {
+        showToast(`Verifikasi hash-chain SHA-256 berhasil: ${data.total_entries} entri, 0 manipulasi terdeteksi.`)
+      } else if (data?.is_valid === false) {
+        showToast(`Peringatan: rantai hash tidak valid — ${data.violations?.length || 0} pelanggaran.`)
+      } else {
+        showToast(`Verifikasi gagal: ${data?.error || res.status}`)
+      }
+    } catch {
+      showToast("Gagal menghubungi backend API")
+    } finally {
       setIsVerifyingChain(false)
-      showToast("Verifikasi integritas rantai SHA-256 berhasil: 100% konsisten, 0 manipulasi terdeteksi.")
-    }, 1200)
+    }
   }
 
   return (

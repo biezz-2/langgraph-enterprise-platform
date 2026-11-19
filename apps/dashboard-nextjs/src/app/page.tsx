@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import {
   FALLBACK_HEALTH,
   FALLBACK_SUBAGENTS,
@@ -18,7 +19,6 @@ import {
   UserCheck,
   Database,
   Network,
-  LayoutGrid,
   ShieldAlert,
   FileCode2,
   Sparkles,
@@ -49,127 +49,81 @@ export default function OverviewPage() {
   const [subagents, setSubagents] = useState<Subagent[]>(FALLBACK_SUBAGENTS)
   const [recentRuns, setRecentRuns] = useState<Run[]>(FALLBACK_RUNS)
   const [hitlItems, setHitlItems] = useState<HITLItem[]>(FALLBACK_HITL_INBOX)
-  const [events, setEvents] = useState<StreamEvent[]>([
-    {
-      id: "ev-1",
-      timestamp: "10:32:15",
-      subagent: "atlas",
-      event_type: "DECOMPOSE_GOAL",
-      message: "Decomposed task into 3 sub-objectives for Clio, Vulcan, and Athena.",
-      severity: "info",
-    },
-    {
-      id: "ev-2",
-      timestamp: "10:32:18",
-      subagent: "clio",
-      event_type: "RESEARCH_COMPLETE",
-      message: "Indexed 4 verified technical citations from enterprise knowledge base.",
-      severity: "success",
-    },
-    {
-      id: "ev-3",
-      timestamp: "10:32:24",
-      subagent: "vulcan",
-      event_type: "AST_VALIDATION",
-      message: "Sandbox test suite executed: 12 tests passed, 0 failures.",
-      severity: "success",
-    },
-    {
-      id: "ev-4",
-      timestamp: "10:32:28",
-      subagent: "athena",
-      event_type: "PHASE_GATE_CHECK",
-      message: "Independent V1-V8 validation gate passed for phase p01.",
-      severity: "success",
-    },
-    {
-      id: "ev-5",
-      timestamp: "10:32:35",
-      subagent: "themis",
-      event_type: "HASH_CHAIN_COMMITTED",
-      message: "Appended SHA-256 audit ledger entry: 5d41402a... -> 7406a6c2...",
-      severity: "info",
-    },
-  ])
+  const [events, setEvents] = useState<StreamEvent[]>([])
 
-  // Try live fetch with offline fallback
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const hRes = await fetch("/api/health")
-        if (hRes.ok) {
-          const hData = await hRes.json()
-          if (hData && typeof hData === "object") {
-            setHealth((prev) => ({ ...prev, ...hData }))
-          }
+  const loadData = useCallback(async () => {
+    try {
+      const hRes = await fetch("/api/health")
+      if (hRes.ok) {
+        const hData = await hRes.json()
+        if (hData && typeof hData === "object") {
+          setHealth((prev) => ({ ...prev, ...hData }))
         }
-      } catch {}
-
-      try {
-        const sRes = await fetch("/api/subagents")
-        if (sRes.ok) {
-          const sData = await sRes.json()
-          if (Array.isArray(sData)) {
-            setSubagents(sData)
-          } else if (sData && Array.isArray(sData.subagents)) {
-            setSubagents(sData.subagents)
-          }
-        }
-      } catch {}
-
-      try {
-        const rRes = await fetch("/api/runs")
-        if (rRes.ok) {
-          const rData = await rRes.json()
-          if (Array.isArray(rData)) {
-            setRecentRuns(rData)
-          } else if (rData && Array.isArray(rData.runs)) {
-            setRecentRuns(rData.runs)
-          }
-        }
-      } catch {}
-
-      try {
-        const hitlRes = await fetch("/api/hitl")
-        if (hitlRes.ok) {
-          const hitlData = await hitlRes.json()
-          if (Array.isArray(hitlData)) {
-            setHitlItems(hitlData)
-          } else if (hitlData && Array.isArray(hitlData.items)) {
-            setHitlItems(hitlData.items)
-          }
-        }
-      } catch {}
-    }
-    loadData()
-  }, [])
-
-  // Simulated live event ticker for active feel
-  useEffect(() => {
-    const agentsList = ["atlas", "clio", "vulcan", "athena", "hermes", "mnemosyne", "janus", "themis", "metron", "iris"]
-    const eventTypes = [
-      { type: "CHECKPOINT_SAVED", msg: "State snapshot persisted to SQLite WAL store.", sev: "info" as const },
-      { type: "HANDOFF_ROUTED", msg: "Optimal routing weight selected based on NPMI matrix.", sev: "info" as const },
-      { type: "MEMORY_INDEXED", msg: "Bi-temporal fact verified without PII leaks.", sev: "success" as const },
-      { type: "CIRCUIT_HEARTBEAT", msg: "Health check OK: 0 consecutive failures.", sev: "info" as const },
-    ]
-
-    const interval = setInterval(() => {
-      const randomAgent = agentsList[Math.floor(Math.random() * agentsList.length)]
-      const randomEv = eventTypes[Math.floor(Math.random() * eventTypes.length)]
-      const newEv: StreamEvent = {
-        id: `ev-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        subagent: randomAgent,
-        event_type: randomEv.type,
-        message: randomEv.msg,
-        severity: randomEv.sev,
       }
-      setEvents((prev) => [newEv, ...prev.slice(0, 19)])
-    }, 6000)
+    } catch {}
 
-    return () => clearInterval(interval)
+    try {
+      const sRes = await fetch("/api/subagents")
+      if (sRes.ok) {
+        const sData = await sRes.json()
+        if (Array.isArray(sData)) {
+          setSubagents(sData)
+        } else if (sData && Array.isArray(sData.subagents)) {
+          setSubagents(sData.subagents)
+        }
+      }
+    } catch {}
+
+    try {
+      const rRes = await fetch("/api/runs")
+      if (rRes.ok) {
+        const rData = await rRes.json()
+        if (Array.isArray(rData)) {
+          setRecentRuns(rData)
+        } else if (rData && Array.isArray(rData.runs)) {
+          setRecentRuns(rData.runs)
+        }
+      }
+    } catch {}
+
+    try {
+      const hitlRes = await fetch("/api/hitl")
+      if (hitlRes.ok) {
+        const hitlData = await hitlRes.json()
+        if (Array.isArray(hitlData)) {
+          setHitlItems(hitlData)
+        } else if (hitlData && Array.isArray(hitlData.items)) {
+          setHitlItems(hitlData.items)
+        }
+      }
+    } catch {}
   }, [])
+
+  // Initial load + realtime refresh on platform events via /ws/dashboard
+  useEffect(() => {
+    loadData()
+    const unsub = onLiveEvent((evt) => {
+      const sev =
+        evt.event.includes("error") || evt.event.includes("fail")
+          ? ("warn" as const)
+          : evt.event.includes("complete") || evt.event.includes("success") || evt.event.includes("updated")
+          ? ("success" as const)
+          : ("info" as const)
+      const newEv: StreamEvent = {
+        id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: new Date().toLocaleTimeString(),
+        subagent: String((evt.data as Record<string, unknown>)?.subagent || evt.event.split("_")[0] || "system"),
+        event_type: evt.event.toUpperCase(),
+        message: JSON.stringify(evt.data).slice(0, 180),
+        severity: sev,
+      }
+      setEvents((prev) => [newEv, ...prev.slice(0, 49)])
+      if (["run_updated", "hitl_updated", "memory_updated", "subagent_updated", "correlation_updated", "matrix_updated", "kanban_updated", "telemetry_emitted"].includes(evt.event)) {
+        loadData()
+      }
+    })
+    return unsub
+  }, [loadData])
 
   const pendingHitlCount = hitlItems.filter((i) => i.status === "pending").length
 
@@ -345,14 +299,6 @@ export default function OverviewPage() {
                 href: "/matrix",
                 icon: Network,
                 badge: "NPMI",
-              },
-              {
-                id: "kanban",
-                title: "Phase-Gate Kanban",
-                desc: "AGENTS.md 6-phase lifecycle board",
-                href: "/kanban",
-                icon: LayoutGrid,
-                badge: "AGENTS.md",
               },
               {
                 id: "guardrails",

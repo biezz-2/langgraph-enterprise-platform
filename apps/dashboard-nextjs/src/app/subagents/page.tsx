@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
+import { onLiveEvent } from "@/lib/liveEvents"
 import { FALLBACK_SUBAGENTS } from "@/lib/mockData"
 import type { Subagent } from "@/types"
 import {
@@ -32,22 +33,37 @@ export default function SubagentsPage() {
     setTimeout(() => setToastMessage(null), 3000)
   }
 
-  useEffect(() => {
-    async function fetchAgents() {
-      try {
-        const res = await fetch("/api/subagents")
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data) && data.length > 0) {
-            setSubagents(data)
-          }
+  const fetchAgents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/subagents")
+      if (res.ok) {
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : data?.subagents
+        if (Array.isArray(list)) {
+          setSubagents(list)
         }
-      } catch {
-        // Fallback remains active
       }
+    } catch {
+      // Fallback remains active
     }
-    fetchAgents()
   }, [])
+
+  const callAdminTool = useCallback(async (tool: string, args: Record<string, unknown>) => {
+    const res = await fetch("/mcp/admin/call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, arguments: args, actor: "dashboard" }),
+    })
+    return res.json().catch(() => ({}))
+  }, [])
+
+  useEffect(() => {
+    fetchAgents()
+    const unsub = onLiveEvent((evt) => {
+      if (evt.event === "subagent_updated") fetchAgents()
+    })
+    return unsub
+  }, [fetchAgents])
 
   const pods = ["All", "Koordinasi", "Riset & Rekayasa", "Platform", "Tata Kelola"]
 
@@ -61,27 +77,35 @@ export default function SubagentsPage() {
     return matchesPod && matchesSearch
   })
 
-  const toggleCircuitBreaker = (agentId: string) => {
-    setSubagents((prev) =>
-      prev.map((a) => {
-        if (a.id === agentId) {
-          const nextState = a.circuit_breaker === "closed" ? "open" : "closed"
-          showToast(`Circuit breaker untuk ${a.name} dialihkan ke ${nextState.toUpperCase()}`)
-          return {
-            ...a,
-            circuit_breaker: nextState,
-            consecutive_failures: nextState === "closed" ? 0 : 3,
-          }
-        }
-        return a
-      })
-    )
+  const toggleCircuitBreaker = async (agent: Subagent) => {
+    const cb = agent.circuit_breaker || "closed"
+    if (cb === "closed") {
+      showToast(`Circuit breaker ${agent.name} sudah CLOSED — trip terjadi otomatis setelah 3 kegagalan beruntun`)
+      return
+    }
+    const res = await callAdminTool("lgp_circuit_breaker_reset", { subagent_id: agent.id })
+    if (res?.error) {
+      showToast(`Gagal reset: ${res.error}`)
+      return
+    }
+    showToast(`Circuit breaker ${agent.name} di-reset ke CLOSED`)
+    fetchAgents()
   }
 
-  const handleSaveBudget = (updated: Subagent) => {
-    setSubagents((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
+  const handleSaveBudget = async (updated: Subagent) => {
+    const res = await callAdminTool("lgp_subagent_update_config", {
+      subagent_id: updated.id,
+      max_usd: updated.budget_config?.max_usd,
+      max_tokens: updated.budget_config?.max_tokens,
+      trust_level: updated.trust_level,
+    })
+    if (res?.error) {
+      showToast(`Gagal menyimpan: ${res.error}`)
+      return
+    }
     setEditingAgent(null)
     showToast(`Konfigurasi budget untuk ${updated.name} berhasil disimpan`)
+    fetchAgents()
   }
 
   return (
@@ -266,7 +290,7 @@ export default function SubagentsPage() {
                   </button>
 
                   <button
-                    onClick={() => toggleCircuitBreaker(agent.id)}
+                    onClick={() => toggleCircuitBreaker(agent)}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-mono border transition ${
                       isClosed
                         ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30"

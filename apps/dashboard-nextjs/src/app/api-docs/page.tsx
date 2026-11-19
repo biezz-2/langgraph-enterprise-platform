@@ -70,24 +70,31 @@ export default function ApiDocsPage() {
     setExecutionResult(null)
   }
 
-  const handleExecuteTool = () => {
+  const handleExecuteTool = async () => {
+    if (!selectedTool) return
     setIsExecuting(true)
-    setTimeout(() => {
-      setIsExecuting(false)
-      const simulatedResponse = {
-        tool: selectedTool.name,
-        status: "success",
-        timestamp: new Date().toISOString(),
-        execution_time_ms: 48,
-        data: {
-          result: `Dry-run execution for ${selectedTool.name} completed cleanly.`,
-          parameters_received: JSON.parse(inputParams || "{}"),
-          server_environment: "fastmcp-python-3.11",
-        },
+    try {
+      let args: Record<string, unknown> = {}
+      try {
+        args = JSON.parse(inputParams || "{}")
+      } catch {
+        showToast("Parameter JSON tidak valid")
+        setIsExecuting(false)
+        return
       }
-      setExecutionResult(JSON.stringify(simulatedResponse, null, 2))
-      showToast(`Tool ${selectedTool.name} berhasil dijalankan (Dry Run)`)
-    }, 400)
+      const res = await fetch("/mcp/admin/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool: selectedTool.name, arguments: args, actor: "api-docs" }),
+      })
+      const data = await res.json().catch(() => ({}))
+      setExecutionResult(JSON.stringify({ tool: selectedTool.name, http_status: res.status, response: data }, null, 2))
+      showToast(res.ok ? `Tool ${selectedTool.name} dieksekusi` : `Tool ${selectedTool.name} error: ${res.status}`)
+    } catch {
+      showToast("Gagal menghubungi backend API")
+    } finally {
+      setIsExecuting(false)
+    }
   }
 
   return (
