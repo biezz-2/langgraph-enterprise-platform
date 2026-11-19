@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import { FALLBACK_RUNS } from "@/lib/mockData"
 import type { Run, RunStep, CheckpointRecord } from "@/types"
 import {
   GitBranch,
@@ -21,8 +20,8 @@ import {
 } from "lucide-react"
 
 export default function RunsPage() {
-  const [runs, setRuns] = useState<Run[]>(FALLBACK_RUNS)
-  const [selectedRunId, setSelectedRunId] = useState<string>(FALLBACK_RUNS[0].run_id)
+  const [runs, setRuns] = useState<Run[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string>("")
   const [selectedStep, setSelectedStep] = useState<RunStep | null>(null)
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<CheckpointRecord | null>(null)
   const [newRunModal, setNewRunModal] = useState<boolean>(false)

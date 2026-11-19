@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import { FALLBACK_MEMORY_FACTS } from "@/lib/mockData"
 import type { MemoryFact } from "@/types"
 import {
   Database,
@@ -21,7 +20,7 @@ import {
 } from "lucide-react"
 
 export default function MemoryPage() {
-  const [facts, setFacts] = useState<MemoryFact[]>(FALLBACK_MEMORY_FACTS)
+  const [facts, setFacts] = useState<MemoryFact[]>([])
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [vectorSearchMode, setVectorSearchMode] = useState<boolean>(false)
   const [addFactModal, setAddFactModal] = useState<boolean>(false)

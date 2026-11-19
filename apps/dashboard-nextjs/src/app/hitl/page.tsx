@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import { FALLBACK_HITL_INBOX } from "@/lib/mockData"
 import type { HITLItem } from "@/types"
 import {
   UserCheck,
@@ -21,7 +20,7 @@ import {
 } from "lucide-react"
 
 export default function HITLPage() {
-  const [items, setItems] = useState<HITLItem[]>(FALLBACK_HITL_INBOX)
+  const [items, setItems] = useState<HITLItem[]>([])
   const [selectedStatus, setSelectedStatus] = useState<string>("all")
   const [modifyingItem, setModifyingItem] = useState<HITLItem | null>(null)
   const [modifiedPayload, setModifiedPayload] = useState<string>("")
@@ -139,7 +138,7 @@ export default function HITLPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setItems(FALLBACK_HITL_INBOX)
+              setItems([])
               showToast("Daftar inbox HITL di-reset ke baseline")
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition"

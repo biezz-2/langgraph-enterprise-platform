@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react"
 import DashboardShell from "@/components/DashboardShell"
-import { FALLBACK_FASTMCP_TOOLS } from "@/lib/mockData"
 import type { FastMCPTool } from "@/types"
 import {
   FileCode2,
@@ -18,9 +17,9 @@ import {
 } from "lucide-react"
 
 export default function ApiDocsPage() {
-  const [tools, setTools] = useState<FastMCPTool[]>(FALLBACK_FASTMCP_TOOLS)
+  const [tools, setTools] = useState<FastMCPTool[]>([])
   const [searchQuery, setSearchQuery] = useState<string>("")
-  const [selectedTool, setSelectedTool] = useState<FastMCPTool>(FALLBACK_FASTMCP_TOOLS[0])
+  const [selectedTool, setSelectedTool] = useState<FastMCPTool | null>(null)
   const [inputParams, setInputParams] = useState<string>("{}")
   const [executionResult, setExecutionResult] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState<boolean>(false)
@@ -40,6 +39,14 @@ export default function ApiDocsPage() {
           const data = await res.json()
           if (Array.isArray(data) && data.length > 0) {
             setTools(data)
+            setSelectedTool(data[0])
+            const sample: Record<string, any> = {}
+            const props = data[0].parameters?.properties || {}
+            Object.keys(props).forEach((k) => {
+              const prop = props[k]
+              sample[k] = prop?.enum ? prop.enum[0] : prop?.type === "number" || prop?.type === "integer" ? 0 : "sample_value"
+            })
+            setInputParams(JSON.stringify(sample, null, 2))
           }
         }
       } catch {
@@ -85,11 +92,11 @@ export default function ApiDocsPage() {
       const res = await fetch("/mcp/admin/call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: selectedTool.name, arguments: args, actor: "api-docs" }),
+        body: JSON.stringify({ tool: selectedTool?.name, arguments: args, actor: "api-docs" }),
       })
       const data = await res.json().catch(() => ({}))
-      setExecutionResult(JSON.stringify({ tool: selectedTool.name, http_status: res.status, response: data }, null, 2))
-      showToast(res.ok ? `Tool ${selectedTool.name} dieksekusi` : `Tool ${selectedTool.name} error: ${res.status}`)
+      setExecutionResult(JSON.stringify({ tool: selectedTool?.name, http_status: res.status, response: data }, null, 2))
+      showToast(res.ok ? `Tool ${selectedTool?.name} dieksekusi` : `Tool ${selectedTool?.name} error: ${res.status}`)
     } catch {
       showToast("Gagal menghubungi backend API")
     } finally {
@@ -167,7 +174,7 @@ export default function ApiDocsPage() {
 
             <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
               {filteredTools.map((tool) => {
-                const isSelected = selectedTool.name === tool.name
+                const isSelected = selectedTool?.name === tool.name
                 const isReadOnly = tool.annotations?.readOnlyHint
 
                 return (
@@ -207,8 +214,8 @@ export default function ApiDocsPage() {
             <div className="p-5 rounded-xl bg-zinc-900/40 border border-zinc-800 space-y-4">
               <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-zinc-100">{selectedTool.name}</h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">{selectedTool.description}</p>
+                  <h3 className="text-sm font-semibold text-zinc-100">{selectedTool?.name}</h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">{selectedTool?.description}</p>
                 </div>
               </div>
 
@@ -220,30 +227,30 @@ export default function ApiDocsPage() {
                 <div className="flex flex-wrap gap-2 text-[10px]">
                   <span
                     className={`px-2 py-0.5 rounded border ${
-                      selectedTool.annotations?.readOnlyHint
+                      selectedTool?.annotations?.readOnlyHint
                         ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                         : "bg-zinc-900 text-zinc-500 border-zinc-800"
                     }`}
                   >
-                    readOnlyHint: {String(selectedTool.annotations?.readOnlyHint)}
+                    readOnlyHint: {String(selectedTool?.annotations?.readOnlyHint)}
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded border ${
-                      selectedTool.annotations?.destructiveHint
+                      selectedTool?.annotations?.destructiveHint
                         ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
                         : "bg-zinc-900 text-zinc-500 border-zinc-800"
                     }`}
                   >
-                    destructiveHint: {String(selectedTool.annotations?.destructiveHint)}
+                    destructiveHint: {String(selectedTool?.annotations?.destructiveHint)}
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded border ${
-                      selectedTool.annotations?.idempotentHint
+                      selectedTool?.annotations?.idempotentHint
                         ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
                         : "bg-zinc-900 text-zinc-500 border-zinc-800"
                     }`}
                   >
-                    idempotentHint: {String(selectedTool.annotations?.idempotentHint)}
+                    idempotentHint: {String(selectedTool?.annotations?.idempotentHint)}
                   </span>
                 </div>
               </div>
@@ -254,7 +261,7 @@ export default function ApiDocsPage() {
                   Parameters Schema
                 </span>
                 <pre className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300 overflow-x-auto max-h-40">
-                  {JSON.stringify(selectedTool.parameters || {}, null, 2)}
+                  {JSON.stringify(selectedTool?.parameters || {}, null, 2)}
                 </pre>
               </div>
 

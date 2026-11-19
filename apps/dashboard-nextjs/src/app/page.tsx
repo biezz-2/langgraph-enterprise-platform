@@ -4,13 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import {
-  FALLBACK_HEALTH,
-  FALLBACK_SUBAGENTS,
-  FALLBACK_RUNS,
-  FALLBACK_HITL_INBOX,
-  FALLBACK_MEMORY_FACTS,
-} from "@/lib/mockData"
+import { FALLBACK_HEALTH } from "@/lib/mockData"
 import type { SystemHealth, Subagent, Run, HITLItem, MemoryFact } from "@/types"
 import {
   Activity,
@@ -46,9 +40,9 @@ interface StreamEvent {
 
 export default function OverviewPage() {
   const [health, setHealth] = useState<SystemHealth>(FALLBACK_HEALTH)
-  const [subagents, setSubagents] = useState<Subagent[]>(FALLBACK_SUBAGENTS)
-  const [recentRuns, setRecentRuns] = useState<Run[]>(FALLBACK_RUNS)
-  const [hitlItems, setHitlItems] = useState<HITLItem[]>(FALLBACK_HITL_INBOX)
+  const [subagents, setSubagents] = useState<Subagent[]>([])
+  const [recentRuns, setRecentRuns] = useState<Run[]>([])
+  const [hitlItems, setHitlItems] = useState<HITLItem[]>([])
   const [events, setEvents] = useState<StreamEvent[]>([])
 
   const loadData = useCallback(async () => {

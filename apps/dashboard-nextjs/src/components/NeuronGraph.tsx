@@ -33,7 +33,8 @@ import {
 } from "lucide-react"
 import EmbeddingAtlas from "./EmbeddingAtlas"
 import { NeuronGraphData, NeuronNode, NeuronLink, ObsidianPhysicsConfig } from "@/types/neuron"
-import { MOCK_GRAPHITI_DATA, processNeuronGraphData } from "@/lib/mockNeuronData"
+import { processNeuronGraphData } from "@/lib/mockNeuronData"
+import { onLiveEvent } from "@/lib/liveEvents"
 import type { ForceGraphMethods as ForceGraph2DMethods } from "react-force-graph-2d"
 import type { ForceGraphMethods as ForceGraph3DMethods } from "react-force-graph-3d"
 
@@ -157,13 +158,9 @@ export default function NeuronGraph() {
         updateTimelineBounds(processed.nodes)
         setLoading(false)
       })
-      .catch(() => {
-        const fallback = MOCK_GRAPHITI_DATA()
-        const processed = processNeuronGraphData(fallback)
-        setRawData(processed)
+      .catch((err) => {
         setIsLiveApi(false)
-        setError(null)
-        updateTimelineBounds(processed.nodes)
+        setError(err?.message || "Gagal memuat graph dari backend")
         setLoading(false)
       })
   }, [])
@@ -188,14 +185,10 @@ export default function NeuronGraph() {
         updateTimelineBounds(processed.nodes)
         setLoading(false)
       })
-      .catch(() => {
+      .catch((err) => {
         if (ignore) return
-        const fallback = MOCK_GRAPHITI_DATA()
-        const processed = processNeuronGraphData(fallback)
-        setRawData(processed)
         setIsLiveApi(false)
-        setError(null)
-        updateTimelineBounds(processed.nodes)
+        setError(err?.message || "Gagal memuat graph dari backend")
         setLoading(false)
       })
 
@@ -207,6 +200,16 @@ export default function NeuronGraph() {
   const handleManualReload = () => {
     loadGraphData()
   }
+
+  // Realtime refresh via platform event bus (/ws/dashboard -> liveEvents)
+  useEffect(() => {
+    const unsub = onLiveEvent((evt) => {
+      if (["memory_updated", "graph_updated", "run_updated", "telemetry_emitted"].includes(evt.event)) {
+        loadGraphData()
+      }
+    })
+    return unsub
+  }, [loadGraphData])
 
   // Timeline auto-play timer
   useEffect(() => {

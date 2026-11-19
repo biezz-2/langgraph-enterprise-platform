@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import { FALLBACK_SUBAGENTS } from "@/lib/mockData"
 import type { Subagent } from "@/types"
 import {
   GitFork,
@@ -22,7 +21,7 @@ import {
 } from "lucide-react"
 
 export default function SubagentsPage() {
-  const [subagents, setSubagents] = useState<Subagent[]>(FALLBACK_SUBAGENTS)
+  const [subagents, setSubagents] = useState<Subagent[]>([])
   const [selectedPod, setSelectedPod] = useState<string>("All")
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [editingAgent, setEditingAgent] = useState<Subagent | null>(null)
@@ -116,7 +115,7 @@ export default function SubagentsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setSubagents(FALLBACK_SUBAGENTS)
+              setSubagents([])
               showToast("Data subagent di-reset ke baseline kontrak default")
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition"

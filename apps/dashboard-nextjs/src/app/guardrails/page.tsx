@@ -2,11 +2,6 @@
 
 import React, { useState, useEffect } from "react"
 import DashboardShell from "@/components/DashboardShell"
-import {
-  FALLBACK_OWASP_LOGS,
-  FALLBACK_AUDIT_LOG,
-  FALLBACK_CIRCUIT_BREAKER_EVENTS,
-} from "@/lib/mockData"
 import type { OWASPGuardrailLog, AuditLogEntry, CircuitBreakerEvent } from "@/types"
 import {
   ShieldAlert,
@@ -24,9 +19,9 @@ import {
 
 export default function GuardrailsPage() {
   const [activeTab, setActiveTab] = useState<"owasp" | "audit" | "breakers">("owasp")
-  const [owaspLogs, setOwaspLogs] = useState<OWASPGuardrailLog[]>(FALLBACK_OWASP_LOGS)
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(FALLBACK_AUDIT_LOG)
-  const [breakerEvents, setBreakerEvents] = useState<CircuitBreakerEvent[]>(FALLBACK_CIRCUIT_BREAKER_EVENTS)
+  const [owaspLogs, setOwaspLogs] = useState<OWASPGuardrailLog[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [breakerEvents, setBreakerEvents] = useState<CircuitBreakerEvent[]>([])
   const [isVerifyingChain, setIsVerifyingChain] = useState<boolean>(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 

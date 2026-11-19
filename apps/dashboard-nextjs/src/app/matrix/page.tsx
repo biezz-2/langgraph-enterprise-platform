@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import DashboardShell from "@/components/DashboardShell"
 import { onLiveEvent } from "@/lib/liveEvents"
-import { generateFallbackCorrelationMatrix } from "@/lib/mockData"
 import type { CorrelationMatrixCell } from "@/types"
 import {
   Network,
@@ -17,7 +16,7 @@ import {
 } from "lucide-react"
 
 export default function MatrixPage() {
-  const [data, setData] = useState(generateFallbackCorrelationMatrix())
+  const [data, setData] = useState<{ subagents: string[]; matrix: CorrelationMatrixCell[][] } | null>(null)
   const [selectedCell, setSelectedCell] = useState<CorrelationMatrixCell | null>(null)
   const [alpha, setAlpha] = useState<number>(0.4)
   const [beta, setBeta] = useState<number>(0.4)
@@ -120,6 +119,11 @@ export default function MatrixPage() {
 
             {/* Matrix Table */}
             <div className="overflow-x-auto pb-2">
+              {!data ? (
+                <div className="py-10 text-center text-xs font-mono text-zinc-500">
+                  Memuat matriks dari backend…
+                </div>
+              ) : (
               <table className="border-collapse font-mono text-center text-xs">
                 <thead>
                   <tr>
@@ -167,6 +171,7 @@ export default function MatrixPage() {
                   })}
                 </tbody>
               </table>
+              )}
             </div>
 
             {/* Legend */}
