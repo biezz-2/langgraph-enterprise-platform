@@ -17,10 +17,10 @@ export const FALLBACK_HEALTH: SystemHealth = {
   platform: "Enterprise LangGraph Platform (LGP v2.0)",
   subagents_active: 10,
   supervisor: "atlas",
-  storage: "SQLite WAL Mode (Bi-temporal)",
+  storage: "Unknown (offline)",
   mcp_admin: "active",
-  uptime_s: 84620,
-  avg_latency_ms: 142,
+  uptime_s: 0,
+  avg_latency_ms: 0,
   active_circuits_open: 0,
 }
 

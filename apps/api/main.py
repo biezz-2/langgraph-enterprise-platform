@@ -29,6 +29,7 @@ from apps.api.hermes_sync import run_full_sync, sync_db_boards_to_hermes
 from apps.api.routers.langgraph_server import router as langgraph_server_router, create_langgraph_tables
 
 logger = logging.getLogger("apps.api.main")
+_PROCESS_START = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,6 +99,17 @@ async def health_check():
         async with db.execute("SELECT COUNT(*) as subagents_count FROM subagent_registry") as cursor:
             row = await cursor.fetchone()
             subagent_count = row["subagents_count"] if row else 0
+        avg_latency = 0.0
+        try:
+            async with db.execute(
+                "SELECT AVG(latency_ms) as avg_lat FROM telemetry_events WHERE latency_ms > 0"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["avg_lat"] is not None:
+                    avg_latency = round(float(row["avg_lat"]), 1)
+        except Exception:
+            pass
+        circuits_open = sum(1 for v in orchestrator.circuit_breaker.open_circuits.values() if v)
         return {
             "status": "healthy",
             "version": "2.0.0",
@@ -105,7 +117,10 @@ async def health_check():
             "subagents_active": subagent_count,
             "supervisor": "atlas",
             "storage": f"Supabase PostgreSQL (schema: {os.environ.get('SUPABASE_SCHEMA', 'langgraph')})" if os.environ.get("USE_SUPABASE", "false").lower() == "true" else "SQLite WAL Mode",
-            "mcp_admin": "active"
+            "mcp_admin": "active",
+            "uptime_s": round(time.time() - _PROCESS_START, 1),
+            "avg_latency_ms": avg_latency,
+            "active_circuits_open": circuits_open,
         }
     finally:
         await db.close()

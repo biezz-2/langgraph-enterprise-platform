@@ -327,7 +327,7 @@ export default function DashboardShell({
                 <div className="text-[10px] font-mono space-y-1 text-zinc-500">
                   <div className="flex justify-between">
                     <span>Supervisor:</span>
-                    <span className="text-zinc-300">Atlas</span>
+                    <span className="text-zinc-300 capitalize">{health.supervisor || "atlas"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Pods:</span>
@@ -335,7 +335,7 @@ export default function DashboardShell({
                   </div>
                   <div className="flex justify-between">
                     <span>Subagents:</span>
-                    <span className="text-emerald-400">10 / 10 Active</span>
+                    <span className="text-emerald-400">{health.subagents_active ?? "—"} Active</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Memory:</span>
@@ -343,7 +343,11 @@ export default function DashboardShell({
                   </div>
                   <div className="flex justify-between">
                     <span>Circuit Breaker:</span>
-                    <span className="text-emerald-400">10 Closed (0 Trip)</span>
+                    <span className={(health.active_circuits_open ?? 0) > 0 ? "text-red-400" : "text-emerald-400"}>
+                      {(health.active_circuits_open ?? 0) > 0
+                        ? `${health.active_circuits_open} Open`
+                        : "All Closed"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -354,7 +358,9 @@ export default function DashboardShell({
           <div className="p-3 border-t border-zinc-800/80 bg-zinc-950/60">
             <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500">
               <span>Schema: langgraph</span>
-              <span className="text-emerald-400">WAL OK</span>
+              <span className={health.storage?.includes("Supabase") ? "text-blue-400" : "text-emerald-400"}>
+                {health.storage?.includes("Supabase") ? "PG OK" : health.storage?.includes("SQLite") ? "WAL OK" : "DB OK"}
+              </span>
             </div>
           </div>
         </aside>

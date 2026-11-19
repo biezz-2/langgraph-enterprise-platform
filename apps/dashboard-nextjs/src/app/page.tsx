@@ -126,6 +126,12 @@ export default function OverviewPage() {
   }, [loadData])
 
   const pendingHitlCount = hitlItems.filter((i) => i.status === "pending").length
+  const openCircuits = subagents.filter((a) => a.circuit_breaker === "open").length
+  const storageLabel = health.storage?.includes("Supabase")
+    ? "Supabase PostgreSQL"
+    : health.storage?.includes("SQLite")
+    ? "SQLite WAL"
+    : health.storage || "Storage Unknown"
 
   return (
     <DashboardShell
@@ -167,7 +173,9 @@ export default function OverviewPage() {
             </div>
             <div className="text-[10px] text-zinc-400 pt-2 border-t border-zinc-800/80 flex justify-between">
               <span>Circuits:</span>
-              <span className="text-emerald-400 font-semibold">10 Closed (0 Trip)</span>
+              <span className={openCircuits > 0 ? "text-red-400 font-semibold" : "text-emerald-400 font-semibold"}>
+                {subagents.length - openCircuits} Closed ({openCircuits} Open)
+              </span>
             </div>
           </div>
 
@@ -179,7 +187,7 @@ export default function OverviewPage() {
             </div>
             <div>
               <span className="text-lg font-bold text-zinc-100">Bi-Temporal</span>
-              <p className="text-[10px] text-emerald-400 mt-0.5">SQLite WAL Intact</p>
+              <p className="text-[10px] text-emerald-400 mt-0.5">{storageLabel}</p>
             </div>
             <div className="text-[10px] text-zinc-400 pt-2 border-t border-zinc-800/80 flex justify-between">
               <span>Curator:</span>

@@ -341,7 +341,7 @@ export default function RunsPage() {
                     Checkpoint State Inspector ({selectedRun.checkpoints?.length || 0} checkpoints)
                   </h3>
                   <span className="text-[10px] font-mono text-zinc-500">
-                    SQLite WAL Snapshot Persistence
+                    Checkpoint Snapshot Persistence
                   </span>
                 </div>
 
@@ -421,7 +421,7 @@ export default function RunsPage() {
               <div className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80 text-[11px] text-zinc-400 space-y-1">
                 <p>&bull; Supervisor node: <span className="text-zinc-200">Atlas (Frontier)</span></p>
                 <p>&bull; Target delegates: <span className="text-zinc-200">Clio, Vulcan, Athena</span></p>
-                <p>&bull; Checkpointing: <span className="text-emerald-400">SQLite WAL Active</span></p>
+                <p>&bull; Checkpointing: <span className="text-emerald-400">LangGraph Saver (lgp_ckpt)</span></p>
               </div>
             </div>
 
