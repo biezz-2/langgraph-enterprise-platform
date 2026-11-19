@@ -710,24 +710,26 @@ async def dashboard_stream():
     queue = GlobalEventBus.get_instance().subscribe()
 
     async def event_generator():
+        # Semua frame dikirim sebagai SSE 'message' (tanpa named event) agar
+        # EventSource.onmessage client-side dapat menangkap semuanya.
         try:
-            # Initial handshake
             yield {
-                "event": "connected",
-                "data": json.dumps({"status": "connected", "timestamp": time.time()})
+                "data": json.dumps({"type": "connected", "status": "connected", "timestamp": time.time()})
             }
             while True:
                 try:
                     evt = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield {
-                        "event": evt.get("event", "update"),
-                        "data": json.dumps(evt.get("data", {}))
+                        "data": json.dumps({
+                            "type": "platform_event",
+                            "event": evt.get("event", "update"),
+                            "data": evt.get("data", {}),
+                            "timestamp": time.time(),
+                        })
                     }
                 except asyncio.TimeoutError:
-                    # Heartbeat
                     yield {
-                        "event": "ping",
-                        "data": json.dumps({"timestamp": time.time()})
+                        "data": json.dumps({"type": "ping", "timestamp": time.time()})
                     }
         finally:
             GlobalEventBus.get_instance().unsubscribe(queue)

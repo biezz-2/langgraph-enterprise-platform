@@ -89,19 +89,17 @@ export default function DashboardShell({
       } catch {}
     }
     setWsStatus("connecting")
-    const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:"
-    const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost"
-    const wsUrl = `${protocol}//${host}:8000/ws/dashboard`
-
+    // SSE same-origin via Next rewrite (/api/* -> :8000) — tidak bergantung
+    // pada port 8000 langsung sehingga stabil di HTTP/HTTPS maupun IP remote.
     try {
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      const source = new EventSource("/api/dashboard/stream")
+      wsRef.current = source as unknown as WebSocket
 
-      ws.onopen = () => {
+      source.onopen = () => {
         setWsStatus("connected")
         setBackendOnline(true)
       }
-      ws.onmessage = (msg) => {
+      source.onmessage = (msg) => {
         try {
           const payload = JSON.parse(msg.data)
           if (payload?.type === "platform_event") {
@@ -112,13 +110,10 @@ export default function DashboardShell({
             })
           }
         } catch {
-          // non-JSON frames (heartbeat etc.) are ignored
+          // non-JSON frames are ignored
         }
       }
-      ws.onerror = () => {
-        setWsStatus("offline")
-      }
-      ws.onclose = () => {
+      source.onerror = () => {
         setWsStatus("offline")
       }
     } catch {
@@ -216,10 +211,10 @@ export default function DashboardShell({
                 }`}
               />
               <span className="hidden sm:inline">
-                {wsStatus === "connected" ? "Live WS Stream" : wsStatus === "connecting" ? "WS Connecting" : "WS Emulated"}
+                {wsStatus === "connected" ? "Live Event Stream" : wsStatus === "connecting" ? "Stream Connecting" : "Stream Offline"}
               </span>
               <span className="sm:hidden font-mono">
-                {wsStatus === "connected" ? "WS Live" : "WS Off"}
+                {wsStatus === "connected" ? "SSE Live" : "SSE Off"}
               </span>
             </span>
 

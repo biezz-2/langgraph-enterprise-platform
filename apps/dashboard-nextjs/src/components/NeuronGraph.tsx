@@ -812,7 +812,7 @@ export default function NeuronGraph() {
                 isLiveApi ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
               }`}
             />
-            <span>{isLiveApi ? "Live Graphiti DB" : "Demo Fallback Mode"}</span>
+            <span>{isLiveApi ? "Live Graphiti DB" : "Backend Offline"}</span>
           </div>
         </div>
       </div>
